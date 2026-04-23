@@ -49,7 +49,7 @@ def get_results(product_id=None, provider=None, collection=None):
     )
     return results[0]
 
-def stream_results(s3, product, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
+def stream_results(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
     stream = product.stream_download()
     if not provider:
         provider = os.environ["PROVIDER"]
