@@ -4,18 +4,10 @@ from botocore.exceptions import ClientError
 from eodag import EODataAccessGateway
 from tqdm.auto import tqdm
 
-
-def set_env(S3_HOST, S3_KEY, S3_PW, CDSE_USER, CDSE_PW):
-    os.environ["S3_HOST"] = S3_HOST
-    os.environ["S3_KEY"] = S3_KEY
-    os.environ["S3_PW"] = S3_PW
-    os.environ["EODAG__COP_DATASPACE__AUTH__CREDENTIALS__USERNAME"] = CDSE_USER
-    os.environ["EODAG__COP_DATASPACE__AUTH__CREDENTIALS__PASSWORD"] = CDSE_PW
-
 def s3_connect():
     S3_HOST = os.environ["S3_HOST"]
     S3_KEY = os.environ["S3_KEY"]
-    S3_SECRET = os.environ["S3_PW"]
+    S3_SECRET = os.environ["S3_SECRET"]
     s3 = boto3.client(
         "s3",
         endpoint_url=S3_HOST,
@@ -24,16 +16,14 @@ def s3_connect():
     )
     return s3
 
-def check_bucket(s3, file, S3_BUCKET="eodag"):
-    if "/" in file:
-        filepath = file
-    elif "MSIL1C" in file:
-        filepath = f"cop_dataspace/S2_MSI_L1C/{file}"
-    elif "MSIL2A" in file:
-        filepath = f"cop_dataspace/S2_MSI_L2A/{file}"
-    else:
-        filepath = file
-
+def check_bucket(s3, product_id=None, provider=None, collection=None, S3_BUCKET="eodag"):
+    if not product_id:
+        product_id = os.environ["PRODUCT_ID"]
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+    filepath = f"{provider}/{collection}/{product_id}"
     try:
         s3.head_object(Bucket=S3_BUCKET, Key=filepath)
         return True
@@ -42,7 +32,13 @@ def check_bucket(s3, file, S3_BUCKET="eodag"):
             return False
         raise
 
-def get_results(collection, product_id, provider="cop_dataspace", dag_run_id="eodag-dag-id"):
+def get_results(product_id=None, provider=None, collection=None):
+    if not product_id:
+        product_id = os.environ["PRODUCT_ID"]
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
     dag = EODataAccessGateway()
     results = dag.search(
         provider=provider,
@@ -67,3 +63,11 @@ def stream_results(s3, product, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
         )
     return True
 
+def access():
+    s3 = s3_connect()
+    if check_bucket(s3):
+        print("Product already exists!")
+    else:
+        product = get_results()
+        stream_results(s3, product)
+        print("Uploaded product!")

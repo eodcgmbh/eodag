@@ -2,16 +2,16 @@ import os
 import time
 import zipfile
 import requests
-from utils import s3_connect, set_env
+from utils import s3_connect
 
 def upload_file(file, s3, S3_BUCKET="eodag"):
-    filename = file.split("/")[-1]
-    if "MSIL1C" in filename:
-        filepath = f"cop_dataspace/S2_MSI_L1C/{filename}"
-    elif "MSIL2A" in filename:
-        filepath = f"cop_dataspace/S2_MSI_L2A/{filename}"
-    else:
-        filepath = file
+    if not file:
+        file = os.environ["PRODUCT_ID"]
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+    filepath = f"{provider}/{collection}/{file}"
     s3.upload_file(file, S3_BUCKET, filepath)
 
 def get_token(refresh_token=None):
