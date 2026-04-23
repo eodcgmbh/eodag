@@ -62,7 +62,7 @@ def stream_results(s3, results=[], S3_BUCKET="eodag", CHUNK_SIZE=8388608):
                 Config=boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE),
                 Callback=pbar.update
             )
-        return s3.list_objects_v2(Bucket=S3_BUCKET).get("Contents", [])
+    return len(results)
 
 
 def upload_file(file, s3, S3_BUCKET="eodag"):
