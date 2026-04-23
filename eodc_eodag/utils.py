@@ -45,7 +45,7 @@ def get_results(product_id=None, provider=None, collection=None):
     results = dag.search(
         provider=provider,
         collection=collection,
-        product_id=product_id
+        id=product_id
     )
     return results[0]
 
