@@ -35,6 +35,8 @@ def check_bucket(s3, product_id=None, provider=None, collection=None, S3_BUCKET=
 def get_results(product_id=None, provider=None, collection=None):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
+    if ".SAFE" in product_id:
+        product_id = product_id.replace(".SAFE", "")
     if not provider:
         provider = os.environ["PROVIDER"]
     if not collection:
@@ -49,10 +51,11 @@ def get_results(product_id=None, provider=None, collection=None):
 
 def stream_results(s3, product, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
     stream = product.stream_download()
-    s3_key = "{}/{}".format(
-        product.properties["title"],
-        stream.filename
-    )
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+    s3_key = f"{provider}/{collection}/{stream.filename}"
     with tqdm(unit="B", unit_scale=True) as pbar:
         s3.upload_fileobj(
             stream.content,
