@@ -45,8 +45,7 @@ WORKDIR /app
 # Copy the pyproject.toml and poetry.lock files to the container
 COPY pyproject.toml ./
 COPY --chown=1000:1000 ./pyproject.toml .
-COPY --chown=1000:1000 ./dask.yaml ~/.config/dask/dask.yaml
-COPY --chown=1000:1000 indices_compute /app/indices_compute
+COPY --chown=1000:1000 eodc_eodag /app/eodc_eodag
 
 # Install dependencies
 RUN poetry install --all-extras
@@ -70,7 +69,7 @@ WORKDIR /app
 
 # Copy over the venv and the code
 COPY --from=base --chown=1000:1000 /app/.venv ./.venv
-COPY --chown=1000:1000 indices_compute /app/indices_compute
+COPY --chown=1000:1000 eodc_eodag /app/eodc_eodag
 
 # Update the symlinks to the python interpreter in the venv to the new location
 RUN ln -sf /usr/local/bin/python /app/.venv/bin/python \
