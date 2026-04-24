@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "eodc-eodag"
-version = "1.0.7"
+version = "1.0.8"
 description = "Create Docker image with dependencies for eodag data access. "
 authors = ["ValentinaHutter <valentina.hutter@eodc.eu>"]
 readme = "README.md"

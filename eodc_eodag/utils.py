@@ -1,5 +1,6 @@
 import os
 import boto3
+import requests
 from botocore.exceptions import ClientError
 from eodag import EODataAccessGateway
 from tqdm.auto import tqdm
@@ -55,22 +56,61 @@ def stream_results(s3, product, provider=None, collection=None, S3_BUCKET="eodag
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
-    s3_key = f"{provider}/{collection}/{stream.filename}"
+    s3_target = f"{provider}/{collection}/{stream.filename}"
+    print(f"Uploading to {s3_target}")
     with tqdm(unit="B", unit_scale=True) as pbar:
         s3.upload_fileobj(
             stream.content,
-            S3_BUCKET,
-            s3_key,
+            Bucket=S3_BUCKET,
+            Key=s3_target,
             Config=boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE),
             Callback=pbar.update
         )
     return True
 
+
+def get_earthdata_result(product_id=None, provider=None, collection=None):
+    if not product_id:
+        product_id = os.environ["PRODUCT_ID"]
+    if "." in product_id:
+        product_id = product_id.split(".")[0]
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+    url = "https://cmr.earthdata.nasa.gov/search"
+    cid = requests.get(f"{url}/collections.json?keyword={collection}").json()["feed"]["entry"][0]["id"]
+    js = requests.get(f"{url}/granules.json?collection_concept_id={cid}&producer_granule_id[]={product_id}").json()
+    js_feed = js.get("feed", {})
+    feats = js_feed.get("entry", []) or []
+    if len(feats) == 1:
+        for l in feats[0]["links"]:
+            if l["rel"].endswith("browse#") and l["href"].startswith("https"):
+                url = l["href"]
+                break
+    else:
+        url = f"https://nisar.asf.earthdatacloud.nasa.gov/BROWSE/{collection[:-2]}/{product_id}/{product_id}.png"
+    return url
+
+def upload_stream_to_s3(s3, url, S3_BUCKET="eodag"):
+    earthdata_user = os.environ["EARTHDATA_USER"]
+    earthdata_password = os.environ["EARTHDATA_USER"]
+    response = requests.get(url, auth=(earthdata_user, earthdata_password), stream=True)
+    response.raise_for_status()
+    provider = os.environ["PROVIDER"]
+    collection = os.environ["COLLECTION"]
+    filename = url.split("/")[-1]
+    s3_target = f"{provider}/{collection}/{filename}"
+    print(f"Uploading to {s3_target}")
+    s3.upload_fileobj(
+        Fileobj=response.raw,
+        Bucket=S3_BUCKET,
+        Key=s3_target
+    )
+
+
 def access():
     s3 = s3_connect()
-    if check_bucket(s3):
-        print("Product already exists!")
-    else:
-        product = get_results()
-        stream_results(s3, product)
-        print("Uploaded product!")
+    product = get_results()
+    stream_results(s3, product)
+    print("Uploaded product!")
