@@ -33,7 +33,7 @@ def check_bucket(s3, product_id=None, provider=None, collection=None, S3_BUCKET=
             return False
         raise
 
-def get_results(product_id=None, provider=None, collection=None):
+def get_eodag_result(product_id=None, provider=None, collection=None):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
     if ".SAFE" in product_id:
@@ -50,7 +50,7 @@ def get_results(product_id=None, provider=None, collection=None):
     )
     return results[0]
 
-def stream_results(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
+def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
     stream = product.stream_download()
     if not provider:
         provider = os.environ["PROVIDER"]
@@ -95,9 +95,9 @@ def get_earthdata_result(product_id=None, provider=None, collection=None):
             url = f"https://cumulus.asf.earthdatacloud.nasa.gov/BROWSE/OPERA/{collection[:-3]}/{product_id}/{product_id}_BROWSE.png"
     return url
 
-def upload_stream_to_s3(s3, url, S3_BUCKET="eodag"):
-    earthdata_user = os.environ["EARTHDATA_USER"]
-    earthdata_password = os.environ["EARTHDATA_USER"]
+def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
+    earthdata_user = os.environ["EARTHDATA_USERNAME"]
+    earthdata_password = os.environ["EARTHDATA_PASSWORD"]
     response = requests.get(url, auth=(earthdata_user, earthdata_password), stream=True)
     response.raise_for_status()
     provider = os.environ["PROVIDER"]
@@ -114,6 +114,6 @@ def upload_stream_to_s3(s3, url, S3_BUCKET="eodag"):
 
 def access():
     s3 = s3_connect()
-    product = get_results()
-    stream_results(s3, product)
+    product = get_eodag_result()
+    stream_eodag_s3(s3, product)
     print("Uploaded product!")
