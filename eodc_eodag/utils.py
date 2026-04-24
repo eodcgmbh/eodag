@@ -89,7 +89,10 @@ def get_earthdata_result(product_id=None, provider=None, collection=None):
                 url = l["href"]
                 break
     else:
-        url = f"https://nisar.asf.earthdatacloud.nasa.gov/BROWSE/{collection[:-2]}/{product_id}/{product_id}.png"
+        if "NISAR" in collection:
+            url = f"https://nisar.asf.earthdatacloud.nasa.gov/BROWSE/{collection[:-2]}/{product_id}/{product_id}.png"
+        if "OPERA" in collection:
+            url = f"https://cumulus.asf.earthdatacloud.nasa.gov/BROWSE/OPERA/{collection[:-3]}/{product_id}/{product_id}_BROWSE.png"
     return url
 
 def upload_stream_to_s3(s3, url, S3_BUCKET="eodag"):
