@@ -83,14 +83,12 @@ def get_earthdata_result(product_id=None, provider=None, collection=None):
     feats = js_feed.get("entry", []) or []
     if len(feats) == 1:
         for l in feats[0]["links"]:
-            if l["rel"].endswith("data#") and l["href"].startswith("https"):
+            if l["rel"].endswith("browse#") and l["href"].startswith("https"):
                 url = l["href"]
                 break
     else:
-        if "NISAR" in collection:
-            url = f"https://nisar.asf.earthdatacloud.nasa.gov/NISAR/{collection[:-2]}/{product_id}/{product_id}.h5"
-        if "OPERA" in collection:
-            url = f"https://cumulus.asf.earthdatacloud.nasa.gov/OPERA/{collection[:-3]}/{product_id}/{product_id}.h5"
+        print("Product not found. Check url: ", f"{url}/granules.json?collection_concept_id={cid}&producer_granule_id[]={product_id}")
+        print(feats)
     return url
 
 def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
