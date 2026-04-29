@@ -1,4 +1,5 @@
 import os
+import time
 import boto3
 import requests
 from botocore.exceptions import ClientError
@@ -94,6 +95,9 @@ def get_earthdata_result(product_id=None, provider=None, collection=None):
 def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
     earthdata_user = os.environ["EARTHDATA_USERNAME"]
     earthdata_password = os.environ["EARTHDATA_PASSWORD"]
+    response = requests.get(url, auth=(earthdata_user, earthdata_password))
+    time.sleep(3)
+    response = requests.get(url, auth=(earthdata_user, earthdata_password))
     response = requests.get(url, auth=(earthdata_user, earthdata_password), stream=True)
     response.raise_for_status()
     provider = os.environ["PROVIDER"]
