@@ -94,30 +94,20 @@ def get_earthdata_result(product_id=None, provider=None, collection=None):
     return url
 
 def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
-    earthdata_user = os.environ["EARTHDATA_USERNAME"]
-    earthdata_password = os.environ["EARTHDATA_PASSWORD"]
-    response = requests.get(url, auth=(earthdata_user, earthdata_password), stream=True)
+    earthdata_token = os.environ["EARTHDATA_TOKEN"]
+    response = requests.get(url, headers={"Authorization": f"Bearer {earthdata_token}"}, stream=True)
     time.sleep(3)
-    response = requests.get(url, auth=(earthdata_user, earthdata_password), stream=True)
     response.raise_for_status()
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
     filename = url.split("/")[-1]
     s3_target = f"{provider}/{collection}/{filename}"
     print(f"Uploading to {s3_target}")
-    try:
-        s3.upload_fileobj(
-            Fileobj=response.raw,
-            Bucket=S3_BUCKET,
-            Key=s3_target
-        )
-    except Exception as e:
-        print(e)
-        s3.upload_fileobj(
-            Fileobj=response.raw,
-            Bucket=S3_BUCKET,
-            Key=s3_target
-        )
+    s3.upload_fileobj(
+        Fileobj=response.raw,
+        Bucket=S3_BUCKET,
+        Key=s3_target
+    )
 
 
 def access():
