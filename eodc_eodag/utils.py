@@ -70,6 +70,20 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
     return True
 
 
+class EarthdataSession(requests.Session):
+    AUTH_HOST = "urs.earthdata.nasa.gov"
+
+    def __init__(self, username, password):
+        super().__init__()
+        self.auth = (username, password)
+
+    def rebuild_auth(self, prepared_request, response):
+        if "Authorization" in prepared_request.headers:
+            original = requests.utils.urlparse(response.request.url).hostname
+            redirect = requests.utils.urlparse(prepared_request.url).hostname
+            if original != redirect and redirect != self.AUTH_HOST:
+                del prepared_request.headers["Authorization"]
+
 def get_earthdata_result(product_id=None, provider=None, collection=None):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
@@ -94,20 +108,56 @@ def get_earthdata_result(product_id=None, provider=None, collection=None):
     return url
 
 def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
-    earthdata_token = os.environ["EARTHDATA_TOKEN"]
-    response = requests.get(url, headers={"Authorization": f"Bearer {earthdata_token}"}, stream=True)
-    time.sleep(3)
-    response.raise_for_status()
+    earthdata_username = os.environ["EARTHDATA_USERNAME"]
+    earthdata_password = os.environ["EARTHDATA_PASSWORD"]
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
     filename = url.split("/")[-1]
     s3_target = f"{provider}/{collection}/{filename}"
-    print(f"Uploading to {s3_target}")
-    s3.upload_fileobj(
-        Fileobj=response.raw,
-        Bucket=S3_BUCKET,
-        Key=s3_target
-    )
+    with EarthdataSession(earthdata_username, earthdata_password) as session:
+        with session.get(url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            print(f"Status: {r.status_code}")
+            mpu = s3.create_multipart_upload(Bucket=S3_BUCKET, Key=s3_target)
+            upload_id = mpu["UploadId"]
+            parts = []
+            part_number = 1
+            buffer = b""
+            MIN_PART_SIZE = 50 * 1024 * 1024
+            try:
+                for chunk in r.iter_content(chunk_size=10 * 1024 * 1024):
+                    buffer += chunk
+                    if len(buffer) >= MIN_PART_SIZE:
+                        part = s3.upload_part(
+                            Bucket=S3_BUCKET,
+                            Key=s3_target,
+                            PartNumber=part_number,
+                            UploadId=upload_id,
+                            Body=buffer,
+                        )
+                        parts.append({"PartNumber": part_number, "ETag": part["ETag"]})
+                        print(f"Uploaded part {part_number} ({len(buffer) / 1024 / 1024:.1f} MB)")
+                        part_number += 1
+                        buffer = b""
+                if buffer:
+                    part = s3.upload_part(
+                        Bucket=S3_BUCKET,
+                        Key=s3_target,
+                        PartNumber=part_number,
+                        UploadId=upload_id,
+                        Body=buffer,
+                    )
+                    parts.append({"PartNumber": part_number, "ETag": part["ETag"]})
+                s3.complete_multipart_upload(
+                    Bucket=S3_BUCKET,
+                    Key=s3_target,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                )
+                print(f"Done! Uploaded to s3://{S3_BUCKET}/{s3_target}")
+            except Exception as e:
+                s3.abort_multipart_upload(Bucket=S3_BUCKET, Key=s3_target, UploadId=upload_id)
+                raise e
 
 
 def access():
