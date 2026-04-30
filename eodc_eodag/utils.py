@@ -84,13 +84,17 @@ class EarthdataSession(requests.Session):
             if original != redirect and redirect != self.AUTH_HOST:
                 del prepared_request.headers["Authorization"]
 
-def get_earthdata_result(product_id=None, provider=None, collection=None, type="data#"):
+def get_earthdata_result(product_id=None, provider=None, collection=None, filetype="data#", end=".h5"):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
     if not provider:
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
+    if product_id.endswith(".png") or filetype=="browse#":
+        filetype="browse#"
+        end = ".png"
+    product_id = product_id.replace(end, "")
     url = "https://cmr.earthdata.nasa.gov/search"
     cid = requests.get(f"{url}/collections.json?keyword={collection}").json()["feed"]["entry"][0]["id"]
     js = requests.get(f"{url}/granules.json?collection_concept_id={cid}&producer_granule_id[]={product_id}").json()
@@ -98,7 +102,7 @@ def get_earthdata_result(product_id=None, provider=None, collection=None, type="
     feats = js_feed.get("entry", []) or []
     if len(feats) == 1:
         for l in feats[0]["links"]:
-            if l["rel"].endswith(type) and l["href"].startswith("https"):
+            if l["rel"].endswith(filetype) and l["href"].startswith("https") and l["href"].endswith(end):
                 url = l["href"]
                 break
     else:
