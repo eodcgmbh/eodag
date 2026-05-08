@@ -172,8 +172,16 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
         )
         print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
 
-def access():
-    s3 = s3_connect()
-    product = get_eodag_result()
-    stream_eodag_s3(s3, product)
+def access(s3, provider=None):
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if provider in ["cop_dataspace"]:
+        product = get_eodag_result()
+        stream_eodag_s3(s3, product)
+    elif provider in ["nasa"]:
+        url = get_earthdata_result()
+        stream_earthdata_s3(s3, url)
+    else:
+        print(f"Could not upload product for provider: {provider}")
+        raise
     print("Uploaded product!")
