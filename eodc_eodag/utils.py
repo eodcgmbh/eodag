@@ -39,6 +39,8 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
         product_id = os.environ["PRODUCT_ID"]
     if ".SAFE" in product_id:
         product_id = product_id.replace(".SAFE", "")
+    if ".zip" in product_id:
+        product_id = product_id.replace(".zip", "")
     if not provider:
         provider = os.environ["PROVIDER"]
     if not collection:
@@ -94,6 +96,9 @@ def get_earthdata_result(product_id=None, provider=None, collection=None, filety
     if product_id.endswith(".png") or filetype=="browse#":
         filetype="browse#"
         end = ".png"
+    if product_id.endswith("_BROWSE.png") or filetype=="browse#":
+        filetype="browse#"
+        end = "_BROWSE.png"
     product_id = product_id.replace(end, "")
     url = "https://cmr.earthdata.nasa.gov/search"
     cid = requests.get(f"{url}/collections.json?keyword={collection}").json()["feed"]["entry"][0]["id"]
