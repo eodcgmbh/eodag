@@ -96,7 +96,7 @@ def get_earthdata_result(product_id=None, provider=None, collection=None, filety
     if product_id.endswith(".png") or filetype=="browse#":
         filetype="browse#"
         end = ".png"
-    if product_id.endswith("_BROWSE.png") or filetype=="browse#":
+    if product_id.endswith("_BROWSE.png"):
         filetype="browse#"
         end = "_BROWSE.png"
     product_id = product_id.replace(end, "")
