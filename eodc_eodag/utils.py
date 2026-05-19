@@ -212,7 +212,7 @@ def access(s3, provider=None):
         raise
     print("Uploaded product!")
 
-def access_extent(s3, start=None, end=None, geom=None):
+def access_extent(s3, provider=None, start=None, end=None, geom=None):
     if not provider:
         provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
