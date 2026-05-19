@@ -218,7 +218,7 @@ def access_extent(s3, provider=None, start=None, end=None, geom=None):
     if provider in ["cop_dataspace"]:
         products = get_eodag_results(start=start, end=end, geom=geom)
         for product in products:
-            stream_earthdata_s3(s3, product)
+            stream_eodag_s3(s3, product)
             print(f"Uploaded product: {product}")
     else:
         print(f"Not implemented for provider: {provider}")
