@@ -198,27 +198,27 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
         )
         print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
 
-def access(s3, provider=None):
+def access(s3, provider=None, s3_bucket="eodag"):
     if not provider:
         provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
         product = get_eodag_result()
-        stream_eodag_s3(s3, product)
+        stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["nasa"]:
         url = get_earthdata_result()
-        stream_earthdata_s3(s3, url)
+        stream_earthdata_s3(s3, url, S3_BUCKET=s3_bucket)
     else:
         print(f"Could not upload product for provider: {provider}")
         raise
     print("Uploaded product!")
 
-def access_extent(s3, provider=None, start=None, end=None, geom=None):
+def access_extent(s3, provider=None, start=None, end=None, geom=None, s3_bucket="eodag"):
     if not provider:
         provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
         products = get_eodag_results(start=start, end=end, geom=geom)
         for product in products:
-            stream_eodag_s3(s3, product)
+            stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
             print(f"Uploaded product: {product}")
     else:
         print(f"Not implemented for provider: {provider}")
