@@ -212,11 +212,11 @@ def access(s3, provider=None):
         raise
     print("Uploaded product!")
 
-def access_extent(s3):
+def access_extent(s3, start=None, end=None, geom=None):
     if not provider:
         provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
-        products = get_eodag_results()
+        products = get_eodag_results(start=start, end=end, geom=geom)
         for product in products:
             stream_earthdata_s3(s3, product)
             print(f"Uploaded product: {product}")
