@@ -34,6 +34,27 @@ def check_bucket(s3, product_id=None, provider=None, collection=None, S3_BUCKET=
             return False
         raise
 
+def get_eodag_results(provider=None, collection=None, start=None, end=None, geom=None):
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+    if not start:
+        start = os.environ["start"]
+    if not end:
+        end = os.environ["end"]
+    if not geom:
+        geom = os.environ["geom"]
+    dag = EODataAccessGateway()
+    results = dag.search(
+        provider=provider,
+        collection=collection,
+        start=start,
+        end=end,
+        geom=geom
+    )
+    return results
+
 def get_eodag_result(product_id=None, provider=None, collection=None):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
@@ -190,3 +211,14 @@ def access(s3, provider=None):
         print(f"Could not upload product for provider: {provider}")
         raise
     print("Uploaded product!")
+
+def access_extent(s3):
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if provider in ["cop_dataspace"]:
+        products = get_eodag_results()
+        for product in products:
+            stream_earthdata_s3(s3, product)
+            print(f"Uploaded product: {product}")
+    else:
+        print(f"Not implemented for provider: {provider}")
