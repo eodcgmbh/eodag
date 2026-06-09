@@ -25,6 +25,8 @@ def check_bucket(s3, product_id=None, provider=None, collection=None, S3_BUCKET=
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
+    if " " in collection or "/" in collection:
+        collection = collection.replace(" ", "_").replace("/", "_")
     filepath = f"{provider}/{collection}/{product_id}"
     try:
         s3.head_object(Bucket=S3_BUCKET, Key=filepath)
@@ -143,6 +145,8 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
     filename = url.split("/")[-1]
+    if " " in collection or "/" in collection:
+        collection = collection.replace(" ", "_").replace("/", "_")
     s3_target = f"{provider}/{collection}/{filename}"
     if url.endswith(".h5"):
         with EarthdataSession(earthdata_username, earthdata_password) as session:
