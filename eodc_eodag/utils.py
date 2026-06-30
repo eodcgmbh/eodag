@@ -271,7 +271,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
         stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["cop_ads", "cop_cds"]:
         product = get_cds_result()
-        stream_cds_s3(s3, product, S3_BUCKET=s3_bucket)
+        stream_cds_s3(s3, product, S3_BUCKET="eodag")
     elif provider in ["nasa"]:
         url = get_earthdata_result()
         stream_earthdata_s3(s3, url, S3_BUCKET="eodag")
