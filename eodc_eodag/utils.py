@@ -202,12 +202,76 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
         )
         print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
 
+
+def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
+    import cdsapi
+    import re
+
+    if not product_id:
+        product_id = os.environ["PRODUCT_ID"]
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+
+    if provider in ["cop_cds"]:
+        url = "https://cds.climate.copernicus.eu/api"
+    elif provider in ["cop_ads"]:
+        url = "https://ads.atmosphere.copernicus.eu/api"
+    os.environ["CDSAPI_URL"] = url
+
+    client = cdsapi.Client()
+
+    re_str = re.search(
+        r"^([a-zA-Z0-9\-]+)_(\-?\d+\.\d+)_(\-?\d+\.\d+)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})_(.+)$",
+        product_id
+    )
+
+    dataset = re_str.group(1)
+    x, y = float(re_str.group(2)), float(re_str.group(3))
+    date = re_str.group(4) + "/" +  re_str.group(5)
+    variable = re_str.group(6)
+    if end in variable:
+        variable = variable.replace(end, "")
+    if end ==".nc":
+        data_format = "netcdf"
+
+    print(dataset, x, y, date, variable)
+
+    request = {
+        "variable": [variable],
+        "location": {"longitude": x, "latitude": y},
+        "date": [date],
+        "data_format": data_format
+    }
+
+    req = client.retrieve(dataset, request)
+    return req.location
+
+
+def stream_cds_s3(s3, url, S3_BUCKET="eodag"):
+    provider = os.environ["PROVIDER"]
+    collection = os.environ["COLLECTION"]
+    filename = os.environ["PRODUCT_ID"]
+    s3_target = f"{provider}/{collection}/{filename}"
+
+    r = requests.get(url, stream=True)
+    s3.upload_fileobj(
+        Fileobj=r.raw,
+        Bucket=S3_BUCKET,
+        Key=s3_target
+    )
+    print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
+
 def access(s3, provider=None, s3_bucket="eodag"):
     if not provider:
         provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
         product = get_eodag_result()
         stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
+    elif provider in ["cop_ads", "cop_cds"]:
+        product = get_cds_result()
+        stream_cds_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["nasa"]:
         url = get_earthdata_result()
         stream_earthdata_s3(s3, url, S3_BUCKET="eodag")
