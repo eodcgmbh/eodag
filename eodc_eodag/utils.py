@@ -248,7 +248,6 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
     req = client.retrieve(dataset, request)
     return req.location
 
-
 def stream_cds_s3(s3, url, S3_BUCKET="eodag"):
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
