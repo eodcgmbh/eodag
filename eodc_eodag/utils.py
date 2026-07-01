@@ -227,24 +227,93 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
         product_id
     )
 
-    dataset = re_str.group(1)
-    x, y = float(re_str.group(2)), float(re_str.group(3))
-    date = re_str.group(4) + "/" +  re_str.group(5)
-    variable = re_str.group(6)
-    if end in variable:
-        variable = variable.replace(end, "")
-    if end ==".nc":
-        data_format = "netcdf"
+    if re_str:
+        dataset = re_str.group(1)
+        x, y = float(re_str.group(2)), float(re_str.group(3))
+        date = re_str.group(4) + "/" +  re_str.group(5)
+        variable = re_str.group(6)
+        if end in variable:
+            variable = variable.replace(end, "")
+        if end ==".nc":
+            data_format = "netcdf"
 
-    print(dataset, x, y, date, variable)
+        request = {
+            "variable": [variable],
+            "location": {"longitude": x, "latitude": y},
+            "date": [date],
+            "data_format": data_format
+        }
+    else:
+        from datetime import datetime
+        import requests
 
-    request = {
-        "variable": [variable],
-        "location": {"longitude": x, "latitude": y},
-        "date": [date],
-        "data_format": data_format
-    }
+        re_str = re.search(
+            r"^([a-zA-Z0-9\-]+)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})_(month_average|10_day_average|daily)?_?(v\d*)_(active|passive|combined)?_?([a-z]*)_(.+)$",
+            product_id
+        )
+        if not re_str:
+            return
+        dataset = re_str.group(1)
+        start, end = re_str.group(2), re_str.group(3)
+        year = []
+        month = []
+        day = []
+        time_aggregation = re_str.group(4)
+        version = re_str.group(5)
+        type_of_sensor = re_str.group(6)
+        type_of_record = re_str.group(7)
+        variable = re_str.group(8)
+        if ".nc" in variable:
+            variable = variable.replace(".nc", "")
 
+        url = f"https://cds.climate.copernicus.eu/api/catalogue/v1/collections/{dataset}/constraints.json"
+        token = os.environ.get("CDSAPI_KEY")
+        resp = requests.get(url, headers={"PRIVATE-TOKEN": token}, timeout=60)
+        constraints = resp.json()
+
+        for entry in constraints:
+            if variable in entry["variable"] and version in entry["version"] and type_of_record in entry["type_of_record"]:
+                if time_aggregation and not time_aggregation in entry["time_aggregation"]:
+                    continue
+                if type_of_sensor and type_of_sensor in entry["type_of_sensor"]:
+                    continue
+                years = entry["year"]
+                months = entry["month"]
+                days = entry["day"]
+                break
+
+        start = datetime.fromisoformat(start)
+        end = datetime.fromisoformat(end)
+        year = [y for y in years if int(start.year) <= int(y) and int(y) <= int(end.year)]
+
+        if len(year) > 2:
+            month = months
+        elif len(year) == 2:
+            month = [m for m in months if int(start.month) <= int(m) or int(m) <= int(end.month)]
+        else:
+            month = [m for m in months if int(start.month) <= int(m) and int(m) <= int(end.month)]
+
+        if len(year) > 2 or len(month) > 2:
+            day = days
+        elif len(month) == 2:
+            day = [d for d in days if int(start.day) <= int(d) or int(d) <= int(end.day)]
+        else:
+            day = [d for d in days if int(start.day) <= int(d) and int(d) <= int(end.day)]
+
+        request = {
+            "variable": [variable],
+            "year": year,
+            "month": month,
+            "day": day,
+            "type_of_record": [type_of_record],
+            "version": [version]
+        }
+        if type_of_sensor:
+            request["type_of_sensor"] = [type_of_sensor]
+        if time_aggregation:
+            request["time_aggregation"] = [time_aggregation]
+
+    print(request)
     req = client.retrieve(dataset, request)
     return req.location
 
@@ -271,6 +340,9 @@ def access(s3, provider=None, s3_bucket="eodag"):
         stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["cop_ads", "cop_cds"]:
         product = get_cds_result()
+        if not product:
+            print(f"Could not upload product for provider: {provider}")
+            raise
         stream_cds_s3(s3, product, S3_BUCKET="eodag")
     elif provider in ["nasa"]:
         url = get_earthdata_result()
