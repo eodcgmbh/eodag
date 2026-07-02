@@ -6,6 +6,9 @@ from botocore.exceptions import ClientError
 from eodag import EODataAccessGateway
 from tqdm.auto import tqdm
 
+from .collections.maap_access import get_maap_result, stream_maap_s3
+
+
 def s3_connect():
     S3_HOST = os.environ["S3_HOST"]
     S3_KEY = os.environ["S3_KEY"]
@@ -317,7 +320,6 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
     req = client.retrieve(dataset, request)
     return req.location
 
-
 def stream_cds_s3(s3, url, S3_BUCKET="eodag"):
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
@@ -347,6 +349,9 @@ def access(s3, provider=None, s3_bucket="eodag"):
     elif provider in ["nasa"]:
         url = get_earthdata_result()
         stream_earthdata_s3(s3, url, S3_BUCKET="eodag")
+    elif provider in ["maap"]:
+        url, headers = get_maap_result()
+        stream_maap_s3(s3, url, headers, S3_BUCKET="eodag")
     else:
         print(f"Could not upload product for provider: {provider}")
         raise
