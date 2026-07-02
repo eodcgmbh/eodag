@@ -54,25 +54,16 @@ def get_maap_result(product_id=None, collection=None):
     print(f"asset_key: {asset_key}")
 
     assets = item.get("assets", {})
-    if asset_key in ("product", "downloadLink"):
-        asset = next(
-            (
-                a for a in assets.values()
-                if "archive" in a.get("roles", []) or a.get("type") == "application/zip"
-            ),
-            None,
-        )
-    else:
-        asset = next(
-            (
-                a for k, a in assets.items()
-                if k == asset_key
-                or a.get("file:local_path") == asset_key
-                or a.get("title") == asset_key
-                or a.get("href", "").endswith(f"/{asset_key}")
-            ),
-            None,
-        )
+    asset = next(
+        (
+            a for k, a in assets.items()
+            if k == asset_key
+            or a.get("file:local_path") == asset_key
+            or a.get("title") == asset_key
+            or a.get("href", "").endswith(f"/{asset_key}")
+        ),
+        None,
+    )
     if asset is None:
         raise RuntimeError(f"No asset matching '{asset_key}' found in item '{item_id}'")
 
