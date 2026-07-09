@@ -5,6 +5,7 @@ from eodag import EODataAccessGateway
 from tqdm.auto import tqdm
 
 from .collections.cds_access import get_cds_result, stream_cds_s3
+from .collections.cop_dataspace_s3 import get_cop_dataspace_s3_result, stream_cop_dataspace_s3
 from .collections.earthdata_access import get_earthdata_result, stream_earthdata_s3
 from .collections.maap_access import get_maap_result, stream_maap_s3
 
@@ -83,9 +84,12 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
 def access(s3, provider=None, s3_bucket="eodag"):
     if not provider:
         provider = os.environ["PROVIDER"]
-    if provider in ["cop_dataspace", "cop_dataspace_s3"]:
+    if provider in ["cop_dataspace"]:
         product = get_eodag_result()
         stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
+    elif provider in ["cop_dataspace_s3"]:
+        product = get_cop_dataspace_s3_result()
+        stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["cop_ads", "cop_cds"]:
         product = get_cds_result()
         if not product:
