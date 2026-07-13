@@ -54,6 +54,8 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
             return
         dataset = re_str.group(1)
         start, end = re_str.group(2), re_str.group(3)
+        start = datetime.fromisoformat(start)
+        end = datetime.fromisoformat(end)
         year = []
         month = []
         day = []
@@ -70,40 +72,55 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
         resp = requests.get(url, headers={"PRIVATE-TOKEN": token}, timeout=60)
         constraints = resp.json()
 
-        for entry in constraints:
-            if variable in entry["variable"] and version in entry["version"] and type_of_record in entry["type_of_record"]:
-                if time_aggregation and not time_aggregation in entry["time_aggregation"]:
+        for e in constraints:
+            if variable and variable not in e.get('variable', []):
+                continue
+            if version and version not in e.get('version', []):
+                continue
+            if type_of_sensor and type_of_sensor not in e.get('type_of_sensor', []):
+                continue
+            if time_aggregation and time_aggregation not in e.get('time_aggregation', []):
+                continue
+            if type_of_record and type_of_record not in e.get('type_of_record', []):
+                continue
+            year = e.get('year', None)
+            if year:
+                years = [y for y in year if int(start.year) <= int(y) and int(y) <= int(end.year)]
+                if len(years) == 0:
                     continue
-                if type_of_sensor and type_of_sensor in entry["type_of_sensor"]:
+
+                month = e.get('month', '')
+                print(month)
+                if len(years) > 2:
+                    months = month
+                elif len(years) == 2:
+                    months = [m for m in month if int(start.month) <= int(m) or int(m) <= int(end.month)]
+                else:
+                    months = [m for m in month if int(start.month) <= int(m) and int(m) <= int(end.month)]
+                if len(months) == 0:
                     continue
-                years = entry["year"]
-                months = entry["month"]
-                days = entry["day"]
-                break
 
-        start = datetime.fromisoformat(start)
-        end = datetime.fromisoformat(end)
-        year = [y for y in years if int(start.year) <= int(y) and int(y) <= int(end.year)]
+                day = e.get('day', '')
+                if len(years) > 2 or len(months) > 2:
+                    days = day
+                elif len(months) == 2:
+                    days = [d for d in day if int(start.day) <= int(d) or int(d) <= int(end.day)]
+                else:
+                    days = [d for d in day if int(start.day) <= int(d) and int(d) <= int(end.day)]
 
-        if len(year) > 2:
-            month = months
-        elif len(year) == 2:
-            month = [m for m in months if int(start.month) <= int(m) or int(m) <= int(end.month)]
-        else:
-            month = [m for m in months if int(start.month) <= int(m) and int(m) <= int(end.month)]
+                if len(days) == 0:
+                    continue
+                else:
+                    entry = e
+                    break
 
-        if len(year) > 2 or len(month) > 2:
-            day = days
-        elif len(month) == 2:
-            day = [d for d in days if int(start.day) <= int(d) or int(d) <= int(end.day)]
-        else:
-            day = [d for d in days if int(start.day) <= int(d) and int(d) <= int(end.day)]
+        print(entry)
 
         request = {
             "variable": [variable],
-            "year": year,
-            "month": month,
-            "day": day,
+            "year": years,
+            "month": months,
+            "day": days,
             "type_of_record": [type_of_record],
             "version": [version]
         }
