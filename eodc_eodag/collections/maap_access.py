@@ -29,9 +29,9 @@ def get_maap_result(product_id=None, collection=None):
     if not collection:
         collection = os.environ["COLLECTION"]
 
-    if "/" not in product_id:
-        raise ValueError("PRODUCT_ID must be in the format '{item_id}/{asset_key}'")
-    item_id, asset_key = product_id.split("/", 1)
+    if "-" not in product_id:
+        raise ValueError("PRODUCT_ID must be in the format '{item_id}-{asset_key}'")
+    item_id, asset_key = product_id.split("-", 1)
 
     token = get_keycloak_token(
         keycloak_url=os.environ.get("MAAP_IAM_URL", "https://iam.maap.eo.esa.int/"),
