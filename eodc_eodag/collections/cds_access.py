@@ -136,7 +136,7 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
             product_id
         )
 
-        datasets = {"cams.eaq.vra.ENSa": "cams-europe-air-quality-reanalyses"}
+        datasets = {"cams.eaq.vra.ENSa": "cams-europe-air-quality-reanalyses", "CAMS_archive_aod550_tcwv_msl_gtco3_analysis_0H_6H_12H_18H": 'cams-global-atmospheric-composition-forecasts'}
         variables = {
             "pm2p5": "particulate_matter_2.5um",
             "o3": "ozone",
@@ -158,6 +158,32 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
                 "year": [year],
                 "month": [month]
             }
+        else: 
+            re_str = re.search(
+                r"^(CAMS_archive_aod550_tcwv_msl_gtco3_analysis_0H_6H_12H_18H)_(\d{4}-\d{2}-\d{2})(.+)$",
+                product_id
+            )
+            if re_str:
+                data = re_str.group(1)
+                date = re_str.group(2)
+
+                dataset = datasets[data]
+                request = {
+                    'variable': [
+                        'total_aerosol_optical_depth_550nm',
+                        'total_column_water_vapour',
+                        'mean_sea_level_pressure',
+                        'total_column_ozone',
+                    ],
+                    'date': date + "/" + date,
+                    'time': [
+                    '00:00', '06:00', '12:00', '18:00',
+                    ],
+                    'leadtime_hour': '0',
+                    'type': 'analysis',
+                    'format': 'netcdf',
+                }
+
 
     print(request)
     req = client.retrieve(dataset, request)
