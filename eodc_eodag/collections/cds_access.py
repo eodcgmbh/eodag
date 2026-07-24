@@ -17,6 +17,8 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
         url = "https://cds.climate.copernicus.eu/api"
     elif provider in ["cop_ads"]:
         url = "https://ads.atmosphere.copernicus.eu/api"
+    elif provider in ["cop_ewds"]:
+        url = "https://ewds.climate.copernicus.eu/api"
     os.environ["CDSAPI_URL"] = url
 
     client = cdsapi.Client()
@@ -184,6 +186,29 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
                     'format': 'netcdf',
                 }
 
+
+    elif provider in ["cop_ewds"]:
+        # PRODUCT_ID format produced by eodag-server's CDSAPISearch plugin
+        # for cop_ewds daily collections: "{collection}_{variable}_{date}.zip"
+        pid = product_id
+        if pid.endswith(".zip"):
+            pid = pid[:-4]
+        date_str = pid[-10:]
+        variable = pid[len(collection) + 1: -(len(date_str) + 1)]
+        hyear, hmonth, hday = date_str.split("-")
+
+        dataset = collection
+        request = {
+            "system_version": ["version_4_0"],
+            "hydrological_model": ["lisflood"],
+            "product_type": ["consolidated"],
+            "variable": [variable],
+            "hyear": [hyear],
+            "hmonth": [hmonth],
+            "hday": [hday],
+            "data_format": "netcdf",
+            "download_format": "zip",
+        }
 
     print(request)
     req = client.retrieve(dataset, request)

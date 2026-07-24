@@ -90,7 +90,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
     elif provider in ["cop_dataspace_s3"]:
         product = get_cop_dataspace_s3_result()
         stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
-    elif provider in ["cop_ads", "cop_cds"]:
+    elif provider in ["cop_ads", "cop_cds", "cop_ewds"]:
         product = get_cds_result()
         if not product:
             print(f"Could not upload product for provider: {provider}")
