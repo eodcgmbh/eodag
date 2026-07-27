@@ -188,6 +188,7 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
 
 
     elif provider in ["cop_ewds"]:
+        import requests
         re_str = re.search(
             r"^([a-zA-Z0-9\-]+)_([a-zA-Z0-9\_]+)_(\d{4}-\d{2}-\d{2}).([a-z]+)$",
             product_id
