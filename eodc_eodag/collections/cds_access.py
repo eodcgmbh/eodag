@@ -220,6 +220,7 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
             request["hmonth"] = [hmonth]
             request["hday"] = [hday]
 
+            req = None
             for product_type in ["consolidated", "intermediate"]:
                 request["product_type"] = [product_type]
                 print(request)
@@ -243,6 +244,7 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
             request["system_version"] = ["4_1"]
             request["grid"] = "original_grid"
 
+            req = None
             for dataset_type in ["consolidated_dataset", "intermediate_dataset"]:
                 request["dataset_type"] = [dataset_type]
                 print(request)
