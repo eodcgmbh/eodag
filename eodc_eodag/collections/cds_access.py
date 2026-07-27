@@ -188,27 +188,69 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
 
 
     elif provider in ["cop_ewds"]:
-        # PRODUCT_ID format produced by eodag-server's CDSAPISearch plugin
-        # for cop_ewds daily collections: "{collection}_{variable}_{date}.zip"
-        pid = product_id
-        if pid.endswith(".zip"):
-            pid = pid[:-4]
-        date_str = pid[-10:]
-        variable = pid[len(collection) + 1: -(len(date_str) + 1)]
+        re_str = re.search(
+            r"^([a-zA-Z0-9\-]+)_([a-zA-Z0-9\_]+)_(\d{4}-\d{2}-\d{2}).zip$",
+            product_id
+        )
+
+        dataset = re_str.group(1)
+        variable = re_str.group(2)
+        date_str = re_str.group(3)
         hyear, hmonth, hday = date_str.split("-")
 
-        dataset = collection
+        if product_id.endswith(".zip"):
+            data_format = "netcdf"
+            download_format = "zip"
+
         request = {
-            "system_version": ["version_4_0"],
-            "hydrological_model": ["lisflood"],
-            "product_type": ["consolidated"],
             "variable": [variable],
-            "hyear": [hyear],
-            "hmonth": [hmonth],
-            "hday": [hday],
-            "data_format": "netcdf",
-            "download_format": "zip",
+            "data_format": data_format,
         }
+
+        if dataset in ["efas-forecast", "cems-glofas-forecast", "cems-glofas-historical"]:
+            request["download_format"] = download_format
+
+        if dataset in ["cems-glofas-historical"]:
+            request["system_version"] = ["version_4_0"]
+            request["hydrological_model"] = ["lisflood"]
+            request["hyear"] = [hyear]
+            request["hmonth"] = [hmonth]
+            request["hday"] = [hday]
+
+            for product_type in ["intermediate", "consolidated"]:
+                request["product_type"] = [product_type]
+                print(request)
+                try:
+                    req = client.retrieve(dataset, request)
+                    break
+                except requests.HTTPError as exc:
+                    last_exc = exc
+            if req is None:
+                raise last_exc
+            return req.location
+
+        if dataset in ["cems-fire-seasonal", "efas-forecast", "cems-glofas-forecast"]:
+            request["year"] = [hyear]
+            request["month"] = [hmonth]
+            request["day"] = [hday]
+
+        if dataset in ["cems-fire-seasonal"]:
+            request["release_version"] = "5"
+            request["leadtime_hour"] = ["12"]
+
+        if dataset in ["efas-forecast"]:
+            request["system_version"] = ["operational"]
+            request["originating_centre"] = "ecmwf"
+            request["product_type"] = ["high_resolution_forecast"]
+            request["model_levels"] = "surface_level"
+            request["time"] = ["00:00"]
+            request["leadtime_hour"] = ["12"]
+            
+        if dataset in ["cems-glofas-forecast"]:
+            request["system_version"] = ["operational"]
+            request["hydrological_model"] = ["lisflood"]
+            request["product_type"] = ["control_forecast"]
+            request["leadtime_hour"] = ["24"]
 
     print(request)
     req = client.retrieve(dataset, request)
