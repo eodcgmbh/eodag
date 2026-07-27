@@ -201,6 +201,8 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
         if product_id.endswith(".zip"):
             data_format = "netcdf"
             download_format = "zip"
+        if product_id.endswith(".grip"):
+            data_format = "grip"
 
         request = {
             "variable": [variable],
@@ -217,7 +219,7 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
             request["hmonth"] = [hmonth]
             request["hday"] = [hday]
 
-            for product_type in ["intermediate", "consolidated"]:
+            for product_type in ["consolidated", "intermediate"]:
                 request["product_type"] = [product_type]
                 print(request)
                 try:
@@ -229,10 +231,28 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
                 raise last_exc
             return req.location
 
-        if dataset in ["cems-fire-seasonal", "efas-forecast", "cems-glofas-forecast"]:
+        if dataset in ["cems-fire-seasonal", "efas-forecast", "cems-glofas-forecast", "cems-fire-historical-v1"]:
             request["year"] = [hyear]
             request["month"] = [hmonth]
             request["day"] = [hday]
+
+        if dataset in ["cems-fire-historical-v1"]:
+            request["product_type"] = "reanalysis"
+            request["dataset_type"] = "consolidated_dataset"
+            request["system_version"] = ["4_1"]
+            request["grid"] = "original_grid"
+
+            for dataset_type in ["consolidated_dataset", "intermediate_dataset"]:
+                request["dataset_type"] = [dataset_type]
+                print(request)
+                try:
+                    req = client.retrieve(dataset, request)
+                    break
+                except requests.HTTPError as exc:
+                    last_exc = exc
+            if req is None:
+                raise last_exc
+            return req.location
 
         if dataset in ["cems-fire-seasonal"]:
             request["release_version"] = "5"
