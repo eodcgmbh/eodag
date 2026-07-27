@@ -189,7 +189,7 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
 
     elif provider in ["cop_ewds"]:
         re_str = re.search(
-            r"^([a-zA-Z0-9\-]+)_([a-zA-Z0-9\_]+)_(\d{4}-\d{2}-\d{2}).zip$",
+            r"^([a-zA-Z0-9\-]+)_([a-zA-Z0-9\_]+)_(\d{4}-\d{2}-\d{2}).([a-z]+)$",
             product_id
         )
 
@@ -200,9 +200,7 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
 
         if product_id.endswith(".zip"):
             data_format = "netcdf"
-            download_format = "zip"
-        if product_id.endswith(".grip"):
-            data_format = "grip"
+        download_format = re_str.group(4)
 
         request = {
             "variable": [variable],
