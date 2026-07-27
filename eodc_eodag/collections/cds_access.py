@@ -242,17 +242,18 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
             request["product_type"] = "reanalysis"
             request["dataset_type"] = "consolidated_dataset"
             request["system_version"] = ["4_1"]
-            request["grid"] = "original_grid"
 
             req = None
             for dataset_type in ["consolidated_dataset", "intermediate_dataset"]:
                 request["dataset_type"] = [dataset_type]
-                print(request)
-                try:
-                    req = client.retrieve(dataset, request)
-                    break
-                except requests.HTTPError as exc:
-                    last_exc = exc
+                for grid in ["original_grid", "0.5/0.5", "0.25/0.25"]:
+                    request["grid"] = grid
+                    print(request)
+                    try:
+                        req = client.retrieve(dataset, request)
+                        break
+                    except requests.HTTPError as exc:
+                        last_exc = exc
             if req is None:
                 raise last_exc
             return req.location
