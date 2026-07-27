@@ -200,7 +200,9 @@ def get_cds_result(product_id=None, provider=None, collection=None, end=".nc"):
 
         if product_id.endswith(".zip"):
             data_format = "netcdf"
-        download_format = re_str.group(4)
+            download_format = re_str.group(4)
+        else:
+            data_format = re_str.group(4)
 
         request = {
             "variable": [variable],
