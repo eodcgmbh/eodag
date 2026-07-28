@@ -78,39 +78,6 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
     return results[0]
 
 
-def get_wekeo_result(product_id=None, collection=None):
-    if not product_id:
-        product_id = os.environ["PRODUCT_ID"]
-    product_id = product_id.replace(".SAFE", "").replace(".zip", "")
-    if not collection:
-        collection = os.environ["COLLECTION"]
-
-    # WEkEO Sentinel-1 doesn't support productIdentifier — derive the
-    # acquisition window from the product ID instead.
-    # Format: S1A_IW_GRDH_1SDV_20230101T151041_20230101T151106_...
-    m = re.match(r"S1[AB]_\w+_\w+_\w+_(\d{8}T\d{6})_(\d{8}T\d{6})_", product_id)
-    if not m:
-        raise ValueError(f"Cannot parse datetime from WEkEO product ID: {product_id}")
-
-    def _fmt(s):
-        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}"
-
-    start = _fmt(m.group(1))
-    end = _fmt(m.group(2))
-
-    dag = EODataAccessGateway()
-    results = dag.search(
-        provider="wekeo_main",
-        collection=collection,
-        start_datetime=start,
-        end_datetime=end,
-    )
-    for r in results:
-        if product_id in r.properties.get("title", "") or product_id in r.properties.get("id", ""):
-            return r
-    return results[0]
-
-
 def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
     stream = product.stream_download()
     if not provider:
@@ -132,6 +99,7 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
 
 def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
+
     if collection == "S1_SAR_GRD":
         _provider = provider or os.environ.get("PROVIDER", "")
         if _provider == "asf":
@@ -143,26 +111,27 @@ def access(s3, provider=None, s3_bucket="eodag"):
         start, end = _s1_time_bounds(product_id)
         dag = EODataAccessGateway()
         # Search by time bounds only — avoids sending productIdentifier to WEkEO (rejects it)
+        # EODAG tries providers in priority order: cop_dataspace → wekeo_main → nasa
         results = dag.search(
             collection=collection,
             start_datetime=start,
             end_datetime=end,
             raise_errors=False,
         )
-        if not results:
-            raise RuntimeError(f"No S1 provider returned {product_id}")
-        product = results[0]
-        if product.provider == "nasa":
-            # CMRSearch found it via ASF/CMR; download using ASFSession (handles URS auth)
-            url = get_asf_result(product_id=product_id)
-            stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider="nasa")
-        else:
+        eodag_results = [r for r in results if r.provider != "nasa"]
+        if eodag_results:
+            product = eodag_results[0]
             stream_eodag_s3(
                 s3, product,
                 provider=product.provider,
                 collection=collection,
                 S3_BUCKET=s3_bucket,
             )
+            print("Uploaded product!")
+            return
+        # cop_dataspace and wekeo_main both failed — fall back to ASF
+        url = get_asf_result(product_id=product_id)
+        stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider="nasa")
         print("Uploaded product!")
         return
 
@@ -170,9 +139,6 @@ def access(s3, provider=None, s3_bucket="eodag"):
         provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
         product = get_eodag_result()
-        stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
-    elif provider in ["wekeo_main"]:
-        product = get_wekeo_result()
         stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["cop_dataspace_s3"]:
         product = get_cop_dataspace_s3_result()
