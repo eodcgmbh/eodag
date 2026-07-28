@@ -56,6 +56,11 @@ def get_cop_dataspace_s3_result(product_id=None):
             result = content["Key"]
             print("RESULT: ", result)
             break
+        elif key.endswith(".jp2") and not "_" in key:
+            if product_id.split("_")[-2] + ".jp2" == key:
+                result = content["Key"]
+                print("RESULT: ", result)
+                break
     else:
         print(f"Could not find item: {product_id} where s3 bucket contains: {[content["Key"] for content in response.get("Contents", [])]}")
         raise
