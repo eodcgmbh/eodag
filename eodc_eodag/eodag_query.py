@@ -28,7 +28,7 @@ def get_eodag_results(provider=None, collection=None, start=None, end=None, geom
 def access_extent(s3, provider=None, start=None, end=None, geom=None, s3_bucket="eodag"):
     if not provider:
         provider = os.environ["PROVIDER"]
-    if provider in ["cop_dataspace", "creodias", "wekeo_main"]:
+    if provider in ["cop_dataspace"]:
         products = get_eodag_results(start=start, end=end, geom=geom)
         for product in products:
             stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)

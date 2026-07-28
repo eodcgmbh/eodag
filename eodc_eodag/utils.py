@@ -168,7 +168,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
 
     if not provider:
         provider = os.environ["PROVIDER"]
-    if provider in ["cop_dataspace", "creodias"]:
+    if provider in ["cop_dataspace"]:
         product = get_eodag_result()
         stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["wekeo_main"]:
