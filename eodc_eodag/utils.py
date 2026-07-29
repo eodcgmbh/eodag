@@ -125,13 +125,13 @@ def access(s3, provider=None, s3_bucket="eodag"):
                 s3, product,
                 provider=_provider,
                 collection=collection,
-                S3_BUCKET=s3_bucket,
+                S3_BUCKET="eodag",
             )
             print("Uploaded product!")
             return
         # cop_dataspace and wekeo_main both failed — fall back to ASF
         url = get_asf_result(product_id=product_id)
-        stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=_provider)
+        stream_asf_s3(s3, url, S3_BUCKET="eodag", provider=_provider)
         print("Uploaded product!")
         return
 
