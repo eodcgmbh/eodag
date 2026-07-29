@@ -101,7 +101,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
 
     if collection == "S1_SAR_GRD":
-        _provider = provider or os.environ.get("PROVIDER", "")
+        _provider = provider or os.environ.get("PROVIDER", "cop_dataspace")
         if _provider == "asf":
             url = get_asf_result()
             stream_asf_s3(s3, url, S3_BUCKET=s3_bucket)
@@ -123,7 +123,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product = eodag_results[0]
             stream_eodag_s3(
                 s3, product,
-                provider=product.provider,
+                provider=_provider,
                 collection=collection,
                 S3_BUCKET=s3_bucket,
             )
@@ -131,7 +131,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
             return
         # cop_dataspace and wekeo_main both failed — fall back to ASF
         url = get_asf_result(product_id=product_id)
-        stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider="nasa")
+        stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=_provider)
         print("Uploaded product!")
         return
 
