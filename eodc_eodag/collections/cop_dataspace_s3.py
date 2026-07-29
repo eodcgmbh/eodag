@@ -56,8 +56,21 @@ def get_cop_dataspace_s3_result(product_id=None):
             result = content["Key"]
             print("RESULT: ", result)
             break
-        elif key.endswith(".jp2") and not "_" in key:
-            if product_id.split("_")[-2] + ".jp2" == key:
+        elif product_id.split("_")[-1] in ["B05.jp2", "B06.jp2", "B07.jp2", "B8A.jp2", "B11.jp2", "B12.jp2"]:
+            product_id_20 = product_id.replace(".jp2", "_20m.jp2")
+            if product_id_20.endswith(key):
+                result = content["Key"]
+                print("RESULT: ", result)
+                break
+        elif product_id.split("_")[-1] in ["B01.jp2", "B09.jp2"]:
+            product_id_60 = product_id.replace(".jp2", "_60m.jp2")
+            if product_id_60.endswith(key):
+                result = content["Key"]
+                print("RESULT: ", result)
+                break
+        elif product_id.split("_")[-1] in ["B02.jp2", "B03.jp2", "B04.jp2", "B08.jp2", "TCI.jp2"]:
+            product_id_10 = product_id.replace(".jp2", "_60m.jp2")
+            if product_id_10.endswith(key):
                 result = content["Key"]
                 print("RESULT: ", result)
                 break
