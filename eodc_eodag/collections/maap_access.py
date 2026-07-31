@@ -76,9 +76,10 @@ def stream_maap_s3(s3, url, headers, S3_BUCKET="eodag"):
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
     product_id = os.environ["PRODUCT_ID"]
+    item_id = os.environ["ITEM_ID"]
     if " " in collection or "/" in collection:
         collection = collection.replace(" ", "_").replace("/", "_")
-    s3_target = f"{provider}/{collection}/{product_id}"
+    s3_target = f"{provider}/{collection}/{item_id}/{product_id}"
 
     r = requests.get(url, headers=headers, stream=True, timeout=180)
     r.raise_for_status()

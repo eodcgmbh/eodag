@@ -78,13 +78,15 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
     return results[0]
 
 
-def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
+def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608, item_id=None):
     stream = product.stream_download()
     if not provider:
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
-    s3_target = f"{provider}/{collection}/{stream.filename}"
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
+    s3_target = f"{provider}/{collection}/{item_id}/{stream.filename}"
     print(f"Uploading to {s3_target}")
     with tqdm(unit="B", unit_scale=True) as pbar:
         s3.upload_fileobj(
