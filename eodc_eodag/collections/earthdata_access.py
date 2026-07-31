@@ -50,10 +50,11 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
     earthdata_password = os.environ["EARTHDATA_PASSWORD"]
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
+    item_id = os.environ["ITEM_ID"]
     filename = url.split("/")[-1]
     if " " in collection or "/" in collection:
         collection = collection.replace(" ", "_").replace("/", "_")
-    s3_target = f"{provider}/{collection}/{filename}"
+    s3_target = f"{provider}/{collection}/{item_id}/{filename}"
     if url.endswith(".h5"):
         with EarthdataSession(earthdata_username, earthdata_password) as session:
             with session.get(url, stream=True, timeout=30) as r:
