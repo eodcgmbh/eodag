@@ -110,30 +110,39 @@ def access(s3, provider=None, s3_bucket="eodag"):
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
         start, end = _s1_time_bounds(product_id)
         dag = EODataAccessGateway()
-        # Search by time bounds only — avoids sending productIdentifier to WEkEO (rejects it)
-        # EODAG tries providers in priority order: cop_dataspace → wekeo_main → nasa
+        # 1. cop_dataspace
         results = dag.search(
+            provider="cop_dataspace",
             collection=collection,
             start_datetime=start,
             end_datetime=end,
             raise_errors=False,
         )
-        eodag_results = [r for r in results if r.provider != "nasa"]
-        if eodag_results:
-            product = eodag_results[0]
-            stream_eodag_s3(
-                s3, product,
-                provider=_provider,
-                collection=collection,
-                S3_BUCKET="eodag",
-            )
+        if results:
+            stream_eodag_s3(s3, results[0], provider=_provider, collection=collection, S3_BUCKET="eodag")
             print("Uploaded product!")
             return
-        # cop_dataspace and wekeo_main both failed — fall back to ASF
-        url = get_asf_result(product_id=product_id)
-        stream_asf_s3(s3, url, S3_BUCKET="eodag", provider=_provider)
-        print("Uploaded product!")
-        return
+        # 2. ASF
+        try:
+            url = get_asf_result(product_id=product_id)
+            stream_asf_s3(s3, url, S3_BUCKET="eodag", provider=_provider)
+            print("Uploaded product!")
+            return
+        except Exception:
+            pass
+        # 3. wekeo_main
+        results = dag.search(
+            provider="wekeo_main",
+            collection=collection,
+            start_datetime=start,
+            end_datetime=end,
+            raise_errors=False,
+        )
+        if results:
+            stream_eodag_s3(s3, results[0], provider=_provider, collection=collection, S3_BUCKET="eodag")
+            print("Uploaded product!")
+            return
+        raise Exception("S1_SAR_GRD: all providers failed (cop_dataspace, ASF, wekeo_main)")
 
     if not provider:
         provider = os.environ["PROVIDER"]
