@@ -1,5 +1,4 @@
 import os
-import re
 import boto3
 from botocore.exceptions import ClientError
 from eodag import EODataAccessGateway
@@ -14,16 +13,6 @@ from .collections.asf_access import get_asf_result, stream_asf_s3
 
 def _normalize_product_id(pid: str) -> str:
     return pid.removesuffix(".zip").removesuffix(".SAFE")
-
-
-def _s1_time_bounds(product_id: str):
-    # Parse start/end from S1 product ID: S1A_IW_GRDH_1SDV_20230101T151041_20230101T151106_...
-    m = re.match(r"S1[ABCD]_\w+_\w+_\w+_(\d{8}T\d{6})_(\d{8}T\d{6})_", product_id)
-    if not m:
-        return None, None
-    def _fmt(s):
-        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}"
-    return _fmt(m.group(1)), _fmt(m.group(2))
 
 
 def s3_connect():
@@ -78,13 +67,16 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
     return results[0]
 
 
-def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
+def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", flat=False, CHUNK_SIZE=8388608):
     stream = product.stream_download()
-    if not provider:
-        provider = os.environ["PROVIDER"]
-    if not collection:
-        collection = os.environ["COLLECTION"]
-    s3_target = f"{provider}/{collection}/{stream.filename}"
+    if flat:
+        s3_target = stream.filename
+    else:
+        if not provider:
+            provider = os.environ["PROVIDER"]
+        if not collection:
+            collection = os.environ["COLLECTION"]
+        s3_target = f"{provider}/{collection}/{stream.filename}"
     print(f"Uploading to {s3_target}")
     with tqdm(unit="B", unit_scale=True) as pbar:
         s3.upload_fileobj(
@@ -101,48 +93,19 @@ def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
 
     if collection == "S1_SAR_GRD":
-        _provider = provider or os.environ.get("PROVIDER", "cop_dataspace")
-        if _provider == "asf":
-            url = get_asf_result()
-            stream_asf_s3(s3, url, S3_BUCKET=s3_bucket)
-            print("Uploaded product!")
-            return
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
-        start, end = _s1_time_bounds(product_id)
         dag = EODataAccessGateway()
-        # 1. cop_dataspace
-        results = dag.search(
-            provider="cop_dataspace",
-            collection=collection,
-            start_datetime=start,
-            end_datetime=end,
-            raise_errors=False,
-        )
+        results = dag.search(collection=collection, id=product_id, raise_errors=False)
         if results:
-            stream_eodag_s3(s3, results[0], provider=_provider, collection=collection, S3_BUCKET="eodag")
+            product = results[0]
+            if product.provider == "nasa":
+                url = get_asf_result(product_id=product_id)
+                stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, flat=True)
+            else:
+                stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket, flat=True)
             print("Uploaded product!")
             return
-        # 2. ASF
-        try:
-            url = get_asf_result(product_id=product_id)
-            stream_asf_s3(s3, url, S3_BUCKET="eodag", provider=_provider)
-            print("Uploaded product!")
-            return
-        except Exception:
-            pass
-        # 3. wekeo_main
-        results = dag.search(
-            provider="wekeo_main",
-            collection=collection,
-            start_datetime=start,
-            end_datetime=end,
-            raise_errors=False,
-        )
-        if results:
-            stream_eodag_s3(s3, results[0], provider=_provider, collection=collection, S3_BUCKET="eodag")
-            print("Uploaded product!")
-            return
-        raise Exception("S1_SAR_GRD: all providers failed (cop_dataspace, ASF, wekeo_main)")
+        raise Exception("S1_SAR_GRD: all providers failed")
 
     if not provider:
         provider = os.environ["PROVIDER"]
