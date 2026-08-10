@@ -90,6 +90,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
 
     if collection == "S1_SAR_GRD":
+        s3_bucket = "eodag"
         _provider = os.environ.get("PROVIDER", "cop_dataspace")
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
         dag = EODataAccessGateway()
