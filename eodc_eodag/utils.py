@@ -67,16 +67,13 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
     return results[0]
 
 
-def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", flat=False, CHUNK_SIZE=8388608):
+def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608):
     stream = product.stream_download()
-    if flat:
-        s3_target = stream.filename
-    else:
-        if not provider:
-            provider = os.environ["PROVIDER"]
-        if not collection:
-            collection = os.environ["COLLECTION"]
-        s3_target = f"{provider}/{collection}/{stream.filename}"
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+    s3_target = f"{provider}/{collection}/{stream.filename}"
     print(f"Uploading to {s3_target}")
     with tqdm(unit="B", unit_scale=True) as pbar:
         s3.upload_fileobj(
@@ -93,6 +90,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
 
     if collection == "S1_SAR_GRD":
+        _provider = os.environ.get("PROVIDER", "cop_dataspace")
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
         dag = EODataAccessGateway()
         results = dag.search(collection=collection, id=product_id, raise_errors=False)
@@ -100,9 +98,9 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product = results[0]
             if product.provider == "nasa":
                 url = get_asf_result(product_id=product_id)
-                stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, flat=True)
+                stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=_provider)
             else:
-                stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket, flat=True)
+                stream_eodag_s3(s3, product, provider=_provider, S3_BUCKET=s3_bucket)
             print("Uploaded product!")
             return
         raise Exception("S1_SAR_GRD: all providers failed")
