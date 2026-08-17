@@ -53,6 +53,7 @@ def get_asf_result(product_id=None):
 def stream_asf_s3(s3, url, S3_BUCKET="eodag", CHUNK_SIZE=8388608, provider=None):
     username = os.environ["EARTHDATA_USERNAME"]
     password = os.environ["EARTHDATA_PASSWORD"]
+    filename = url.split("/")[-1]
     provider = provider or os.environ["PROVIDER"]
     item_id = os.environ["ITEM_ID"]
     collection = os.environ["COLLECTION"]
