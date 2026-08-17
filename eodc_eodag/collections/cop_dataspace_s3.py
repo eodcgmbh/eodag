@@ -82,13 +82,15 @@ def get_cop_dataspace_s3_result(product_id=None):
     return product
 
 
-def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, provider=None, collection=None):
+def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, provider=None, collection=None, item_id=None):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
     if not provider:
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
-    s3_target = f"{provider}/{collection}/{product_id}"
+    s3_target = f"{provider}/{collection}/{item_id}/{product_id}"
     s3_eodc.upload_fileobj(product, S3_BUCKET, s3_target)
     return

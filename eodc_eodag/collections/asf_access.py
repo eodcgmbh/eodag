@@ -55,10 +55,12 @@ def stream_asf_s3(s3, url, S3_BUCKET="eodag", CHUNK_SIZE=8388608, provider=None)
     password = os.environ["EARTHDATA_PASSWORD"]
     filename = url.split("/")[-1]
     provider = provider or os.environ["PROVIDER"]
+    item_id = os.environ["ITEM_ID"]
     collection = os.environ["COLLECTION"]
     if " " in collection or "/" in collection:
         collection = collection.replace(" ", "_").replace("/", "_")
-    s3_target = f"{provider}/{collection}/{filename}"
+    filename = url.split("/")[-1]
+    s3_target = f"{provider}/{collection}/{item_id}/{filename}"
     print(f"Uploading to {s3_target}")
     with ASFSession(username, password) as session:
         with session.get(url, stream=True, timeout=60) as r:

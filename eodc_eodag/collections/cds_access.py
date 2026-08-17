@@ -284,7 +284,8 @@ def stream_cds_s3(s3, url, S3_BUCKET="eodag"):
     provider = os.environ["PROVIDER"]
     collection = os.environ["COLLECTION"]
     filename = os.environ["PRODUCT_ID"]
-    s3_target = f"{provider}/{collection}/{filename}"
+    item_id = os.environ["ITEM_ID"]
+    s3_target = f"{provider}/{collection}/{item_id}/{filename}"
 
     r = requests.get(url, stream=True)
     s3.upload_fileobj(
