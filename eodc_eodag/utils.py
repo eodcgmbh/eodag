@@ -90,9 +90,11 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
     return s3_target
 
 
-def open_zip(s3, zip_product, provider=None, collection=None, item_id=None, s3_bucket="eodag", target_provider="cop_dataspace_s3"):
-    import io
+def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
+             s3_bucket="eodag", target_provider="cop_dataspace_s3",
+             CHUNK_SIZE=8388608):
     import zipfile
+    import tempfile
 
     if not provider:
         provider = os.environ["PROVIDER"]
@@ -101,20 +103,27 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None, s3_b
     if not item_id:
         item_id = os.environ["ITEM_ID"]
 
-    obj = s3.get_object(Bucket=s3_bucket, Key=zip_product)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_zip = os.path.join(tmpdir, f"{item_id}.zip")
 
-    with zipfile.ZipFile(io.BytesIO(obj['Body'].read())) as z:
-        for name in z.namelist():
-            if name.endswith('/'):
-                continue
-            file = name.split("/")[-1]
-            s3_target = f"{target_provider}/{collection}/{item_id}/{file}"
-            s3.put_object(
-                Bucket=s3_bucket,
-                Key=s3_target,
-                Body=z.read(name)
-            )
-            print(s3_target)
+        # streams to disk in chunks internally — no full read into memory
+        print(f"Downloading {zip_product} to disk")
+        s3.download_file(s3_bucket, zip_product, local_zip)
+
+        with zipfile.ZipFile(local_zip, "r") as z:
+            for name in z.namelist():
+                if name.endswith("/"):
+                    continue
+                file = name.split("/")[-1]
+                s3_target = f"{target_provider}/{collection}/{item_id}/{file}"
+                with z.open(name) as member:
+                    s3.upload_fileobj(
+                        member,
+                        Bucket=s3_bucket,
+                        Key=s3_target,
+                        Config=boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE),
+                    )
+                print(s3_target)
 
 
 def access(s3, provider=None, s3_bucket="eodag"):
