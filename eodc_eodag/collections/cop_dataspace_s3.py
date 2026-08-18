@@ -76,7 +76,7 @@ def get_cop_dataspace_s3_result(product_id=None):
                 break
     else:
         print(f"Could not find item: {product_id} where s3 bucket contains: {[content["Key"] for content in response.get("Contents", [])]}")
-        raise
+        return False
 
     product = s3_aws.get_object(Bucket="eodata", Key=result)["Body"]
     return product
