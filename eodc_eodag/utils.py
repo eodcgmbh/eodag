@@ -88,6 +88,33 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
     return True
 
 
+def open_zip(s3, product, s3_bucket="eodag"):
+    import io
+    import zipfile
+
+    stream = product.stream_download()
+    if not provider:
+        provider = os.environ["PROVIDER"]
+    if not collection:
+        collection = os.environ["COLLECTION"]
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
+    zip_product = f"{provider}/{collection}/{item_id}/{stream.filename}"
+
+    obj = s3.get_object(Bucket=s3_bucket, Key=zip_product)
+
+    with zipfile.ZipFile(io.BytesIO(obj['Body'].read())) as z:
+        for name in z.namelist():
+            if name.endswith('/'):
+                continue
+            s3_target = f"{provider}/{collection}/{item_id}/{name}"
+            s3.put_object(
+                Bucket=s3_bucket,
+                Key=s3_target,
+                Body=z.read(name)
+            )
+
+
 def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
 
@@ -113,6 +140,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
     if provider in ["cop_dataspace"]:
         product = get_eodag_result()
         stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
+        open_zip(s3=s3, product=product, s3_bucket=s3_bucket)
     elif provider in ["cop_dataspace_s3"]:
         product = get_cop_dataspace_s3_result()
         stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
