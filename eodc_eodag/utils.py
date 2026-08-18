@@ -87,21 +87,19 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
             Config=boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE),
             Callback=pbar.update
         )
-    return True
+    return s3_target
 
 
-def open_zip(s3, product, provider=None, collection=None, item_id=None, s3_bucket="eodag", target_provider="cop_dataspace_s3"):
+def open_zip(s3, zip_product, provider=None, collection=None, item_id=None, s3_bucket="eodag", target_provider="cop_dataspace_s3"):
     import io
     import zipfile
 
-    stream = product.stream_download()
     if not provider:
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
     if not item_id:
         item_id = os.environ["ITEM_ID"]
-    zip_product = f"{provider}/{collection}/{item_id}/{stream.filename}"
 
     obj = s3.get_object(Bucket=s3_bucket, Key=zip_product)
 
@@ -116,6 +114,7 @@ def open_zip(s3, product, provider=None, collection=None, item_id=None, s3_bucke
                 Key=s3_target,
                 Body=z.read(name)
             )
+            print(s3_target)
 
 
 def access(s3, provider=None, s3_bucket="eodag"):
@@ -142,16 +141,16 @@ def access(s3, provider=None, s3_bucket="eodag"):
         provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
         product = get_eodag_result()
-        stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
-        open_zip(s3=s3, product=product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
+        zip_product = stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
+        open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
     elif provider in ["cop_dataspace_s3"]:
         product = get_cop_dataspace_s3_result()
         if product:
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
         else:
             product = get_eodag_result(provider="cop_dataspace")
-            stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
-            open_zip(s3=s3, product=product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
+            zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
+            open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
     elif provider in ["cop_ads", "cop_cds", "cop_ewds"]:
         product = get_cds_result()
         if not product:
