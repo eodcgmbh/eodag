@@ -18,7 +18,7 @@ def aws():
 
 def get_cop_dataspace_s3_result(product_id=None):
     if not product_id:
-        product_id = os.environ["PRODUCT_ID"]
+        product_id = os.environ["ITEM_ID"] + "_" + os.environ["PRODUCT_ID"]
 
     s3_aws = aws()
 
