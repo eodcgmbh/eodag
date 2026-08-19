@@ -56,6 +56,7 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
         product_id = product_id.replace(".zip", "")
     else:
         product_id = os.environ["ITEM_ID"]
+    print(f"Product ID: {product_id}")
     if not provider:
         provider = os.environ["PROVIDER"]
     if not collection:
@@ -157,6 +158,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
         if product:
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
         else:
+            print("Product not found. Trying cop_dataspace instead...")
             product = get_eodag_result(provider="cop_dataspace")
             zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
             open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")

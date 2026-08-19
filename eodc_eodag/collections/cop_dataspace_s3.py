@@ -41,12 +41,14 @@ def get_cop_dataspace_s3_result(product_id=None):
     path = path + datetime_[:4] + "/" + datetime_[4:6] + "/" + datetime_[6:8] + "/"
     path = path + re_str.group() + ".SAFE" + "/" 
 
-
-    response = s3_aws.list_objects_v2(
-        Bucket="eodata",
-        Prefix=path,
-        MaxKeys=100
-    )
+    try:
+        response = s3_aws.list_objects_v2(
+            Bucket="eodata",
+            Prefix=path,
+            MaxKeys=100
+        )
+    except Exception as e:
+        print(f"Could not list objects for {e}")
 
     for content in response.get("Contents", []):
         key = content["Key"].split("/")[-1]
