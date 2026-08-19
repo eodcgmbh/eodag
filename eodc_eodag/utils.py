@@ -124,7 +124,7 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
                         Key=s3_target,
                         Config=boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE),
                     )
-                print(s3_target)
+                print(f"Unzipped: {s3_target}")
 
 
 def access(s3, provider=None, s3_bucket="eodag"):

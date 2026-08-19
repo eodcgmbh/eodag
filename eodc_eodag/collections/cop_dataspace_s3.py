@@ -94,5 +94,6 @@ def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, prov
     if not collection:
         collection = os.environ["COLLECTION"]
     s3_target = f"{provider}/{collection}/{item_id}/{product_id}"
-    s3_eodc.upload_fileobj(product, S3_BUCKET, s3_target)
+    s3_eodc.upload_fileobj(product, Bucket=S3_BUCKET, Key=s3_target)
+    print(f"Target path: {s3_target}")
     return
