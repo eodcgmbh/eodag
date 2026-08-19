@@ -100,15 +100,16 @@ def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, prov
         )
         tile = re_str.group(6)
         date = re_str.group(3)
-        if product_id.split("_")[-1] in ["B05.jp2", "B06.jp2", "B07.jp2", "B8A.jp2", "B11.jp2", "B12.jp2"]:
-            product_id = product_id.replace(".jp2", "_20m.jp2")
-        if product_id.split("_")[-1] in ["B01.jp2", "B09.jp2"]:
-            product_id = product_id.replace(".jp2", "_60m.jp2")
-        if product_id.split("_")[-1] in ["B02.jp2", "B03.jp2", "B04.jp2", "B08.jp2", "TCI.jp2"]:
-            product_id = product_id.replace(".jp2", "_10m.jp2")
-        s3_target = f"{provider}/{collection}/{item_id}/{tile}_{date}_{product_id}"
-    else:
-        s3_target = f"{provider}/{collection}/{item_id}/{product_id}"
+        if collection in ["S2_MSI_L2A"]:
+            if product_id.split("_")[-1] in ["B05.jp2", "B06.jp2", "B07.jp2", "B8A.jp2", "B11.jp2", "B12.jp2"]:
+                product_id = product_id.replace(".jp2", "_20m.jp2")
+            if product_id.split("_")[-1] in ["B01.jp2", "B09.jp2"]:
+                product_id = product_id.replace(".jp2", "_60m.jp2")
+            if product_id.split("_")[-1] in ["B02.jp2", "B03.jp2", "B04.jp2", "B08.jp2", "TCI.jp2"]:
+                product_id = product_id.replace(".jp2", "_10m.jp2")
+        if not tile in product_id and not date in product_id:
+            product_id = f"{tile}_{date}_{product_id}"
+    s3_target = f"{provider}/{collection}/{item_id}/{product_id}"
     s3_eodc.upload_fileobj(product, Bucket=S3_BUCKET, Key=s3_target)
     print(f"Target path: {s3_target}")
     return
