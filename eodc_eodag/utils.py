@@ -115,8 +115,7 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
             for name in z.namelist():
                 if name.endswith("/"):
                     continue
-                file = name.split("/")[-1]
-                s3_target = f"{target_provider}/{collection}/{item_id}/{file}"
+                s3_target = f"{target_provider}/{collection}/{item_id}/{name}"
                 with z.open(name) as member:
                     s3.upload_fileobj(
                         member,

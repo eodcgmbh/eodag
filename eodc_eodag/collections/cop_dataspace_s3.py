@@ -1,6 +1,47 @@
 import os
 import re
+import requests
 import boto3
+
+CATALOGUE_URL = "https://catalogue.dataspace.copernicus.eu/odata/v1"
+DOWNLOAD_URL = "https://download.dataspace.copernicus.eu/odata/v1"
+
+def file_path(asset, item_id: str, collection_name: str = "SENTINEL-2"):
+
+    def get_product_uuid(product_name: str, collection_name: str = "SENTINEL-2") -> str:
+        url = f"{CATALOGUE_URL}/Products?$filter=Collection/Name eq '{collection_name}' and Name eq '{product_name}'"
+        r = requests.get(url)
+        r.raise_for_status()
+        results = r.json()["value"]
+        if not results:
+            raise ValueError(f"No product found with name: {product_name}")
+        return results[0]["Id"]
+
+    def list_nodes(url: str) -> list:
+        r = requests.get(url)
+        r.raise_for_status()
+        return r.json()["result"]
+
+    def walk_safe(product_uuid: str, product_name: str, token: str):
+        root_url = f"{DOWNLOAD_URL}/Products({product_uuid})/Nodes({product_name})/Nodes"
+
+        def _walk(url: str, path_prefix: str):
+            for node in list_nodes(url, token):
+                name = node["Name"]
+                path = f"{path_prefix}/{name}"
+                children_url = node["Nodes"]["uri"]
+                if node.get("ChildrenNumber", 0) > 0:
+                    yield from _walk(children_url, path)
+                else:
+                    yield path
+
+        yield from _walk(root_url, product_name)
+
+    uuid = get_product_uuid(item_id, collection_name)
+
+    for file_path in walk_safe(uuid, item_id):
+        if asset in file_path:
+            return file_path
 
 
 def aws():
@@ -109,7 +150,8 @@ def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, prov
                 product_id = product_id.replace(".jp2", "_10m.jp2")
         if not tile in product_id and not date in product_id:
             product_id = f"{tile}_{date}_{product_id}"
-    s3_target = f"{provider}/{collection}/{item_id}/{product_id}"
+    product_path = file_path(product_id, item_id)
+    s3_target = f"{provider}/{collection}/{item_id.replace(".SAFE", "")}/{product_path}"
     s3_eodc.upload_fileobj(product, Bucket=S3_BUCKET, Key=s3_target)
     print(f"Target path: {s3_target}")
     return
