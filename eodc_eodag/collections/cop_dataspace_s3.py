@@ -22,7 +22,7 @@ def file_path(asset, item_id: str, collection_name: str = "SENTINEL-2"):
         r.raise_for_status()
         return r.json()["result"]
 
-    def walk_safe(product_uuid: str, product_name: str, token: str):
+    def walk_safe(product_uuid: str, product_name: str):
         root_url = f"{DOWNLOAD_URL}/Products({product_uuid})/Nodes({product_name})/Nodes"
 
         def _walk(url: str, path_prefix: str):
