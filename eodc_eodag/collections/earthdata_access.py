@@ -28,6 +28,12 @@ def get_earthdata_result(product_id=None, provider=None, collection=None, filety
     if product_id.endswith("_BROWSE.png"):
         filetype="browse#"
         end = "_BROWSE.png"
+    if product_id.endswith(".jpg") or filetype=="browse#":
+        filetype="browse#"
+        end = ".jpg"
+    if product_id.endswith("_BROWSE.jpg"):
+        filetype="browse#"
+        end = "_BROWSE.jpg"
     product_id = product_id.replace(end, "")
     url = "https://cmr.earthdata.nasa.gov/search"
     cid = requests.get(f"{url}/collections.json?keyword={collection}").json()["feed"]["entry"][0]["id"]
@@ -101,6 +107,14 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
                     s3.abort_multipart_upload(Bucket=S3_BUCKET, Key=s3_target, UploadId=upload_id)
                     raise e
     elif url.endswith(".png"):
+        r = requests.get(url, auth=(earthdata_username, earthdata_password), stream=True)
+        s3.upload_fileobj(
+            Fileobj=r.raw,
+            Bucket=S3_BUCKET,
+            Key=s3_target
+        )
+        print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
+    elif url.endswith(".jpg"):
         r = requests.get(url, auth=(earthdata_username, earthdata_password), stream=True)
         s3.upload_fileobj(
             Fileobj=r.raw,
