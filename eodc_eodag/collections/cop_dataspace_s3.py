@@ -26,7 +26,7 @@ def file_path(asset, item_id: str, collection_name: str = "SENTINEL-2"):
         root_url = f"{DOWNLOAD_URL}/Products({product_uuid})/Nodes({product_name})/Nodes"
 
         def _walk(url: str, path_prefix: str):
-            for node in list_nodes(url, token):
+            for node in list_nodes(url):
                 name = node["Name"]
                 path = f"{path_prefix}/{name}"
                 children_url = node["Nodes"]["uri"]
@@ -36,6 +36,9 @@ def file_path(asset, item_id: str, collection_name: str = "SENTINEL-2"):
                     yield path
 
         yield from _walk(root_url, product_name)
+
+    if ".SAFE" not in item_id:
+        item_id += ".SAFE"
 
     uuid = get_product_uuid(item_id, collection_name)
 
