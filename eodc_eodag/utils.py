@@ -26,11 +26,6 @@ def _normalize_product_id(pid: str) -> str:
 
 @functools.lru_cache(maxsize=1)
 def _cop_dataspace_products():
-    """Raw `products:` mapping from eodag's own bundled provider config
-    (resources/providers/cop_dataspace.yml) -- the same file eodag itself
-    uses to build its search queries. Loaded once and shared by the derived
-    lookups below.
-    """
     path = os.path.join(
         os.path.dirname(_eodag_pkg.__file__), "resources", "providers", "cop_dataspace.yml"
     )
@@ -40,17 +35,9 @@ def _cop_dataspace_products():
 
 @functools.lru_cache(maxsize=1)
 def _cop_dataspace_product_type_by_cdse_type():
-    """Reverse map from CDSE's OData `productType` attribute value (e.g.
-    "L2__NO2___") to eodag's own product-type/collection ID (e.g.
-    "S5P_L2_NO2").
-
-    Needed because several STAC collections are umbrellas over several
-    distinct eodag product types with no 1:1 name match (e.g. some
-    Sentinel-3/Sentinel-5P collections aren't real eodag product types at
-    all -- eodag registers their sub-products separately). The individual
-    product actually being requested tells us, via its own real CDSE
-    metadata, which specific one it is.
-    """
+    # Maps CDSE's OData productType (e.g. "L2__NO2___") to eodag's own
+    # product-type ID (e.g. "S5P_L2_NO2") -- needed since several STAC
+    # collections are umbrellas over multiple distinct eodag product types.
     return {
         entry["product:type"]: product_type_id
         for product_type_id, entry in _cop_dataspace_products().items()
@@ -60,26 +47,13 @@ def _cop_dataspace_product_type_by_cdse_type():
 
 @functools.lru_cache(maxsize=1)
 def _cop_dataspace_known_product_types():
-    """Set of every valid eodag product-type/collection ID under
-    cop_dataspace -- used to detect collections eodag has NO registration
-    for at all (some auxiliary/orbit data types have zero entries), so
-    get_eodag_result() can skip eodag's search machinery entirely instead of
-    hitting a guaranteed-empty search.
-    """
     return set(_cop_dataspace_products().keys())
 
 
-# Last-resort fallback for umbrella collections where CDSE's real productType
-# attribute doesn't exact-match any of eodag's own bundled `product:type`
-# values, so the primary OData-driven resolution below can't find anything.
-# Confirmed empirically: eodag's ODataV4Search builds `download` requests
-# from the product's own resolved Id/Name (via `id=` search), not from the
-# collection's productType filter -- so search+download succeed with ANY
-# valid, same-family eodag product-type key, even one whose own productType
-# filter wouldn't literally match this specific product. e.g. some Sentinel-1
-# COG variants report a mode-specific productType, while eodag's own entry
-# for that product type uses a generic placeholder that never appears as a
-# literal substring of the real value.
+# CDSE's productType for these has no exact match in eodag's own config (e.g.
+# S1 COG variants report a mode-specific value eodag's generic placeholder
+# never matches). Safe fallback since eodag's download uses id=, not
+# productType, so any same-family key works.
 _COP_DATASPACE_FALLBACK_PRODUCT_TYPE = {
     "S1_RAW": "S1_SAR_RAW",
     "S1_SAR_COG": "S1_SAR_GRD_COG",
@@ -87,13 +61,6 @@ _COP_DATASPACE_FALLBACK_PRODUCT_TYPE = {
 
 
 def resolve_eodag_collection(collection, product_id):
-    """Resolve an umbrella STAC collection name to the specific eodag
-    product-type ID a given product actually is, via CDSE's own OData
-    `productType` attribute. Falls back to a known static mapping, then to
-    the passed-through collection name unchanged, on any failure (product
-    not found, no matching entry, network error) -- always safe to call
-    unconditionally.
-    """
     fallback = _COP_DATASPACE_FALLBACK_PRODUCT_TYPE.get(collection, collection)
     try:
         response = requests.get(
@@ -150,12 +117,8 @@ def check_bucket(s3, product_id=None, provider=None, collection=None, S3_BUCKET=
 
 
 def get_eodag_result(product_id=None, provider=None, collection=None):
-    """Returns None (rather than raising) when eodag has no product-type
-    registration at all for this collection under `provider` (some
-    auxiliary/orbit data types have zero registration) -- callers should
-    fall back to a non-eodag-search path in that case instead of treating it
-    as an error.
-    """
+    # Returns None (not an error) when eodag has no product-type registration
+    # for this collection at all -- caller falls back to a non-eodag path.
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
     if ".SAFE" in product_id:
@@ -242,17 +205,9 @@ def access(s3, provider=None, s3_bucket="eodag"):
     if not provider:
         provider = os.environ["PROVIDER"]
 
-    # S1_SAR_GRD's multi-provider fallback only applies to whole-product
-    # downloadLink requests -- those are the only ones where PROVIDER is
-    # "cop_dataspace" for this collection (the router flips backend to
-    # "cop_dataspace" specifically for downloadLink; individual-asset
-    # requests keep PROVIDER "cop_dataspace_s3" and fall through to the
-    # standard dispatch below like every other collection, so this
-    # collection's access pattern is otherwise identical/predictable across
-    # all CDSE collections).
+    # Multi-provider fallback, downloadLink only -- per-asset requests use
+    # "cop_dataspace_s3" and fall through to the standard dispatch below.
     if collection == "S1_SAR_GRD" and provider == "cop_dataspace":
-        # s3_bucket is whatever the caller passed in -- do not hardcode it,
-        # so a dedicated bucket configured for this collection is respected.
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
         dag = EODataAccessGateway()
         results = dag.search(collection=collection, id=product_id, raise_errors=False)
@@ -274,19 +229,11 @@ def access(s3, provider=None, s3_bucket="eodag"):
             if zip_product.endswith(".zip"):
                 open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
         else:
-            # eodag has no product-type registration at all for this
-            # collection (some auxiliary/orbit data types) -- fetch the real
-            # object directly via CDSE OData instead, bypassing eodag's
-            # search machinery entirely. Only works for single-file products;
-            # see get_cop_dataspace_s3_whole_product_result()'s docstring.
             product = get_cop_dataspace_s3_whole_product_result()
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
     elif provider in ["cop_dataspace_s3"]:
-        # S2 keeps its existing (dedicated) resolver untouched. Every other
-        # cop_dataspace_s3 collection uses the generic, OData-S3Path-driven
-        # resolver -- see get_cop_dataspace_s3_asset_result()'s docstring for
-        # why that generalizes cleanly instead of needing its own
-        # per-mission regex.
+        # S2 keeps its existing dedicated resolver; every other collection
+        # uses the generic OData-driven one.
         if collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
             product = get_cop_dataspace_s3_result()
             if product:
