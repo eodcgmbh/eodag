@@ -60,6 +60,97 @@ def aws():
     return s3
 
 
+def _lookup_s3path(item_id):
+    """Query CDSE's own OData index for item_id's real S3Path, with the
+    "eodata/" bucket-name segment stripped (S3Path comes back as e.g.
+    "/eodata/Sentinel-3/SYNERGY/.../....SEN3" -- "eodata" is the bucket name
+    itself, not part of the key).
+    """
+    response = requests.get(
+        "https://catalogue.dataspace.copernicus.eu/odata/v1/Products",
+        params={"$filter": f"contains(Name,'{item_id}')", "$top": 1},
+        timeout=30,
+    )
+    response.raise_for_status()
+    results = response.json().get("value", [])
+    if not results:
+        raise ValueError(f"CDSE has no product matching item_id={item_id!r}")
+    return results[0]["S3Path"].removeprefix("/eodata/")
+
+
+def get_cop_dataspace_s3_whole_product_result(item_id=None):
+    """Fallback whole-product fetch for collections eodag's own search
+    doesn't support at all under cop_dataspace (some auxiliary/orbit data
+    types have zero product-type registration there) -- bypasses eodag's
+    search machinery entirely, using the same OData S3Path lookup as
+    get_cop_dataspace_s3_asset_result(), and fetches the product's real S3
+    object directly.
+
+    Only handles single-file products (S3Path points directly at a file, not
+    a folder); folder-based products (.SAFE/.SEN3 directories of many files)
+    need eodag's own search+download support instead, since there's no single
+    object to fetch and no generically-correct way to reconstruct/zip the
+    folder here.
+    """
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
+
+    key_or_prefix = _lookup_s3path(item_id)
+    if "." not in key_or_prefix.rsplit("/", 1)[-1]:
+        raise ValueError(
+            f"{item_id!r} is a folder-based product (S3 prefix {key_or_prefix!r}), "
+            "not a single file -- the whole-product fallback only supports "
+            "single-file products; this collection needs eodag's own "
+            "search+download support instead."
+        )
+
+    s3_aws = aws()
+    return s3_aws.get_object(Bucket="eodata", Key=key_or_prefix)["Body"]
+
+
+def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
+    """Mission-agnostic per-asset resolver for cop_dataspace_s3.
+
+    Looks up the product's real S3 folder directly from CDSE's own OData
+    index (the S3Path attribute), keyed on item_id, then lists that folder
+    and matches the requested asset by filename. No per-mission
+    path-building knowledge needed, so this works for any collection whose
+    product is a directory of individual files on CDSE's S3 (Sentinel-3's
+    flat .SEN3 layout, a nested layout like Sentinel-1's .SAFE too, since S3
+    prefix listing matches recursively and only the filename -- not its
+    subpath -- is compared).
+
+    PRODUCT_ID here is `{item_id}_{asset_name}` (the router's generic join,
+    e.g. "..._Syn_Oa09_reflectance.nc") -- item_id is stripped back off to
+    recover the real CDSE-internal filename to search for.
+    """
+    if not product_id:
+        product_id = os.environ["PRODUCT_ID"]
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
+
+    asset_name = product_id.removeprefix(f"{item_id}_")
+    key_or_prefix = _lookup_s3path(item_id)
+
+    s3_aws = aws()
+    if key_or_prefix.split("/")[-1] == asset_name:
+        # Single-file products (e.g. a flat .nc file: S3Path points directly
+        # at the file, not a folder) -- nothing to list, the path already is
+        # the key.
+        key = key_or_prefix
+    else:
+        prefix = key_or_prefix + "/"
+        listing = s3_aws.list_objects_v2(Bucket="eodata", Prefix=prefix, MaxKeys=1000)
+        for content in listing.get("Contents", []):
+            if content["Key"].split("/")[-1] == asset_name:
+                key = content["Key"]
+                break
+        else:
+            raise ValueError(f"Could not find asset {asset_name!r} under {prefix}")
+
+    return s3_aws.get_object(Bucket="eodata", Key=key)["Body"]
+
+
 def get_cop_dataspace_s3_result(product_id=None):
     if not product_id:
         product_id = os.environ["ITEM_ID"] + "_" + os.environ["PRODUCT_ID"]
@@ -153,8 +244,15 @@ def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, prov
                 product_id = product_id.replace(".jp2", "_10m.jp2")
         if not tile in product_id and not date in product_id:
             product_id = f"{tile}_{date}_{product_id}"
-    product_path = file_path(product_id, item_id)
-    s3_target = f"{provider}/{collection}/{item_id.replace(".SAFE", "")}/{product_path}"
+        product_path = file_path(product_id, item_id)
+        s3_target = f"{provider}/{collection}/{item_id.replace('.SAFE', '')}/{product_path}"
+    else:
+        # Other missions' assets are already resolved to their exact real S3
+        # object (via the OData S3Path-driven lookup in
+        # get_cop_dataspace_s3_asset_result()/get_cop_dataspace_s3_whole_product_result())
+        # before reaching here, so no further per-mission path
+        # reconstruction is needed -- upload under a plain, predictable key.
+        s3_target = f"{provider}/{collection}/{item_id.replace('.SAFE', '')}/{product_id}"
     s3_eodc.upload_fileobj(product, Bucket=S3_BUCKET, Key=s3_target)
     print(f"Target path: {s3_target}")
     return
