@@ -229,8 +229,8 @@ def access(s3, provider=None, s3_bucket="eodag"):
             if zip_product.endswith(".zip"):
                 open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
         else:
-            product = get_cop_dataspace_s3_whole_product_result()
-            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
+            product, real_filename = get_cop_dataspace_s3_whole_product_result()
+            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename)
     elif provider in ["cop_dataspace_s3"]:
         # S2 keeps its existing dedicated resolver; every other collection
         # uses the generic OData-driven one.
@@ -245,8 +245,8 @@ def access(s3, provider=None, s3_bucket="eodag"):
                 if zip_product.endswith(".zip"):
                     open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
         else:
-            product = get_cop_dataspace_s3_asset_result()
-            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
+            product, real_relative_path = get_cop_dataspace_s3_asset_result()
+            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_relative_path)
     elif provider in ["cop_ads", "cop_cds", "cop_ewds"]:
         product = get_cds_result()
         if not product:

@@ -84,11 +84,13 @@ def get_cop_dataspace_s3_whole_product_result(item_id=None):
         item_id = os.environ["ITEM_ID"]
 
     key_or_prefix = _lookup_s3path(item_id)
-    if "." not in key_or_prefix.rsplit("/", 1)[-1]:
+    filename = key_or_prefix.rsplit("/", 1)[-1]
+    if "." not in filename:
         raise ValueError(f"{item_id!r} is folder-based, not a single file")
 
     s3_aws = aws()
-    return s3_aws.get_object(Bucket="eodata", Key=key_or_prefix)["Body"]
+    stream = s3_aws.get_object(Bucket="eodata", Key=key_or_prefix)["Body"]
+    return stream, filename
 
 
 def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
@@ -106,17 +108,20 @@ def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
     s3_aws = aws()
     if key_or_prefix.split("/")[-1] == asset_name:
         key = key_or_prefix  # single-file product: S3Path already is the key
+        relative_path = asset_name
     else:
         prefix = key_or_prefix + "/"
         listing = s3_aws.list_objects_v2(Bucket="eodata", Prefix=prefix, MaxKeys=1000)
         for content in listing.get("Contents", []):
             if content["Key"].split("/")[-1] == asset_name:
                 key = content["Key"]
+                relative_path = key[len(prefix):]  # real internal path, e.g. "preview/quick-look.png"
                 break
         else:
             raise ValueError(f"Could not find asset {asset_name!r} under {prefix}")
 
-    return s3_aws.get_object(Bucket="eodata", Key=key)["Body"]
+    stream = s3_aws.get_object(Bucket="eodata", Key=key)["Body"]
+    return stream, relative_path
 
 
 def get_cop_dataspace_s3_result(product_id=None):
@@ -187,7 +192,7 @@ def get_cop_dataspace_s3_result(product_id=None):
     return product
 
 
-def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, provider=None, collection=None, item_id=None):
+def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, provider=None, collection=None, item_id=None, real_key=None):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
     if not item_id:
@@ -196,7 +201,11 @@ def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, prov
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
-    if product_id.endswith(".jp2") and not product_id.startswith("MSK"):
+    if real_key is not None:
+        # Rolling Archive's own convention: real filename/relative-path, not
+        # this resolver's synthetic flat name.
+        s3_target = f"{provider}/{collection}/{item_id.replace('.SAFE', '')}/{real_key}"
+    elif product_id.endswith(".jp2") and not product_id.startswith("MSK"):
         re_str = re.search(
             r"^(S2A|S2B|S2C|S2D)_(MSIL1C|MSIL2A)_(\d{8}T\d{6})_(N\d{4})_(R\d{3})_(.{6})_(\d{8}T\d{6})",
             item_id
