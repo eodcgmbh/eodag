@@ -165,6 +165,19 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
     return s3_target
 
 
+def _common_zip_prefix(names):
+    # Same technique as rolling-archive-worker's _detect_common_prefix(): SAFE
+    # zips nest every entry under one top-level "<name>.SAFE/" dir.
+    file_names = [n for n in names if not n.endswith("/")]
+    if not file_names:
+        return ""
+    first_segment = file_names[0].split("/", 1)
+    if len(first_segment) < 2:
+        return ""
+    candidate = first_segment[0] + "/"
+    return candidate if all(n.startswith(candidate) for n in file_names) else ""
+
+
 def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
              s3_bucket="eodag", target_provider="cop_dataspace_s3",
              CHUNK_SIZE=8388608):
@@ -186,10 +199,19 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
         s3.download_file(s3_bucket, zip_product, local_zip)
 
         with zipfile.ZipFile(local_zip, "r") as z:
-            for name in z.namelist():
+            names = z.namelist()
+            # TODO: S2 keeps the un-stripped key shape for now, pending review
+            # by whoever owns the S2 pipeline -- every other collection below
+            # strips the zip's common top-level directory (e.g. "PRODUCT.SAFE/")
+            # to match Rolling Archive's real per-asset convention. Switch S2
+            # over once nothing downstream is confirmed to depend on the
+            # current shape.
+            common_prefix = "" if collection in ["S2_MSI_L1C", "S2_MSI_L2A"] else _common_zip_prefix(names)
+            for name in names:
                 if name.endswith("/"):
                     continue
-                s3_target = f"{target_provider}/{collection}/{item_id}/{name}"
+                relative_path = name[len(common_prefix):] if common_prefix else name
+                s3_target = f"{target_provider}/{collection}/{item_id}/{relative_path}"
                 with z.open(name) as member:
                     s3.upload_fileobj(
                         member,
