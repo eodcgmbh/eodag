@@ -60,6 +60,72 @@ def aws():
     return s3
 
 
+def _lookup_s3path(item_id):
+    # S3Path comes back as "/eodata/Sentinel-3/.../....SEN3" -- "eodata" is the
+    # bucket name, not part of the key.
+    response = requests.get(
+        "https://catalogue.dataspace.copernicus.eu/odata/v1/Products",
+        params={"$filter": f"contains(Name,'{item_id}')", "$top": 1},
+        timeout=30,
+    )
+    response.raise_for_status()
+    results = response.json().get("value", [])
+    if not results:
+        raise ValueError(f"CDSE has no product matching item_id={item_id!r}")
+    return results[0]["S3Path"].removeprefix("/eodata/")
+
+
+def get_cop_dataspace_s3_whole_product_result(item_id=None):
+    # Fallback for collections eodag has no product-type registration for at
+    # all (some AUX/orbit types) -- fetches the real S3 object directly via
+    # OData, bypassing eodag's search entirely. Single-file products only;
+    # folder-based (.SAFE/.SEN3) products still need eodag's own download.
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
+
+    key_or_prefix = _lookup_s3path(item_id)
+    filename = key_or_prefix.rsplit("/", 1)[-1]
+    if "." not in filename:
+        raise ValueError(f"{item_id!r} is folder-based, not a single file")
+
+    s3_aws = aws()
+    stream = s3_aws.get_object(Bucket="eodata", Key=key_or_prefix)["Body"]
+    return stream, filename
+
+
+def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
+    # Mission-agnostic per-asset resolver: looks up the product's real S3
+    # folder via OData (no per-mission path-building needed) and matches the
+    # requested asset by filename. Returns None (not an error) when the
+    # asset genuinely doesn't exist -- a bogus/typo'd name is a normal
+    # "not found" outcome, not a system failure.
+    if not product_id:
+        product_id = os.environ["PRODUCT_ID"]
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
+
+    asset_name = product_id.removeprefix(f"{item_id}_")
+    key_or_prefix = _lookup_s3path(item_id)
+
+    s3_aws = aws()
+    if key_or_prefix.split("/")[-1] == asset_name:
+        key = key_or_prefix  # single-file product: S3Path already is the key
+        relative_path = asset_name
+    else:
+        prefix = key_or_prefix + "/"
+        listing = s3_aws.list_objects_v2(Bucket="eodata", Prefix=prefix, MaxKeys=1000)
+        for content in listing.get("Contents", []):
+            if content["Key"].split("/")[-1] == asset_name:
+                key = content["Key"]
+                relative_path = key[len(prefix):]  # real internal path, e.g. "preview/quick-look.png"
+                break
+        else:
+            return None
+
+    stream = s3_aws.get_object(Bucket="eodata", Key=key)["Body"]
+    return stream, relative_path
+
+
 def get_cop_dataspace_s3_result(product_id=None):
     if not product_id:
         product_id = os.environ["ITEM_ID"] + "_" + os.environ["PRODUCT_ID"]
@@ -128,7 +194,7 @@ def get_cop_dataspace_s3_result(product_id=None):
     return product
 
 
-def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, provider=None, collection=None, item_id=None):
+def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, provider=None, collection=None, item_id=None, real_key=None):
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
     if not item_id:
@@ -137,7 +203,11 @@ def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, prov
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
-    if product_id.endswith(".jp2") and not product_id.startswith("MSK"):
+    if real_key is not None:
+        # Rolling Archive's own convention: real filename/relative-path, not
+        # this resolver's synthetic flat name.
+        s3_target = f"{provider}/{collection}/{item_id.replace('.SAFE', '')}/{real_key}"
+    elif product_id.endswith(".jp2") and not product_id.startswith("MSK"):
         re_str = re.search(
             r"^(S2A|S2B|S2C|S2D)_(MSIL1C|MSIL2A)_(\d{8}T\d{6})_(N\d{4})_(R\d{3})_(.{6})_(\d{8}T\d{6})",
             item_id
@@ -153,8 +223,12 @@ def stream_cop_dataspace_s3(s3_eodc, product, S3_BUCKET, product_id = None, prov
                 product_id = product_id.replace(".jp2", "_10m.jp2")
         if not tile in product_id and not date in product_id:
             product_id = f"{tile}_{date}_{product_id}"
-    product_path = file_path(product_id, item_id)
-    s3_target = f"{provider}/{collection}/{item_id.replace(".SAFE", "")}/{product_path}"
+        product_path = file_path(product_id, item_id)
+        s3_target = f"{provider}/{collection}/{item_id.replace('.SAFE', '')}/{product_path}"
+    else:
+        # Non-S2 assets are already resolved to their real S3 object before
+        # reaching here -- no per-mission path reconstruction needed.
+        s3_target = f"{provider}/{collection}/{item_id.replace('.SAFE', '')}/{product_id}"
     s3_eodc.upload_fileobj(product, Bucket=S3_BUCKET, Key=s3_target)
     print(f"Target path: {s3_target}")
     return

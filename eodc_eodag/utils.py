@@ -1,11 +1,20 @@
+import functools
 import os
 import boto3
+import eodag as _eodag_pkg
+import requests
+import yaml
 from botocore.exceptions import ClientError
 from eodag import EODataAccessGateway
 from tqdm.auto import tqdm
 
 from .collections.cds_access import get_cds_result, stream_cds_s3
-from .collections.cop_dataspace_s3 import get_cop_dataspace_s3_result, stream_cop_dataspace_s3
+from .collections.cop_dataspace_s3 import (
+    get_cop_dataspace_s3_result,
+    get_cop_dataspace_s3_asset_result,
+    get_cop_dataspace_s3_whole_product_result,
+    stream_cop_dataspace_s3,
+)
 from .collections.earthdata_access import get_earthdata_result, stream_earthdata_s3
 from .collections.maap_access import get_maap_result, stream_maap_s3
 from .collections.asf_access import get_asf_result, stream_asf_s3
@@ -13,6 +22,66 @@ from .collections.asf_access import get_asf_result, stream_asf_s3
 
 def _normalize_product_id(pid: str) -> str:
     return pid.removesuffix(".zip").removesuffix(".SAFE")
+
+
+@functools.lru_cache(maxsize=1)
+def _cop_dataspace_products():
+    path = os.path.join(
+        os.path.dirname(_eodag_pkg.__file__), "resources", "providers", "cop_dataspace.yml"
+    )
+    with open(path) as f:
+        return yaml.safe_load(f)["cop_dataspace"]["products"]
+
+
+@functools.lru_cache(maxsize=1)
+def _cop_dataspace_product_type_by_cdse_type():
+    # Maps CDSE's OData productType (e.g. "L2__NO2___") to eodag's own
+    # product-type ID (e.g. "S5P_L2_NO2") -- needed since several STAC
+    # collections are umbrellas over multiple distinct eodag product types.
+    return {
+        entry["product:type"]: product_type_id
+        for product_type_id, entry in _cop_dataspace_products().items()
+        if "product:type" in entry
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def _cop_dataspace_known_product_types():
+    return set(_cop_dataspace_products().keys())
+
+
+# CDSE's productType for these has no exact match in eodag's own config (e.g.
+# S1 COG variants report a mode-specific value eodag's generic placeholder
+# never matches). Safe fallback since eodag's download uses id=, not
+# productType, so any same-family key works.
+_COP_DATASPACE_FALLBACK_PRODUCT_TYPE = {
+    "S1_RAW": "S1_SAR_RAW",
+    "S1_SAR_COG": "S1_SAR_GRD_COG",
+}
+
+
+def resolve_eodag_collection(collection, product_id):
+    fallback = _COP_DATASPACE_FALLBACK_PRODUCT_TYPE.get(collection, collection)
+    try:
+        response = requests.get(
+            "https://catalogue.dataspace.copernicus.eu/odata/v1/Products",
+            params={
+                "$filter": f"contains(Name,'{product_id}')",
+                "$top": 1,
+                "$expand": "Attributes",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        results = response.json().get("value", [])
+        if not results:
+            return fallback
+        for attr in results[0].get("Attributes", []):
+            if attr.get("Name") == "productType":
+                return _cop_dataspace_product_type_by_cdse_type().get(attr["Value"], fallback)
+    except Exception:
+        pass
+    return fallback
 
 
 def s3_connect():
@@ -48,6 +117,8 @@ def check_bucket(s3, product_id=None, provider=None, collection=None, S3_BUCKET=
 
 
 def get_eodag_result(product_id=None, provider=None, collection=None):
+    # Returns None (not an error) when eodag has no product-type registration
+    # for this collection at all -- caller falls back to a non-eodag path.
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
     if ".SAFE" in product_id:
@@ -61,10 +132,13 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
         provider = os.environ["PROVIDER"]
     if not collection:
         collection = os.environ["COLLECTION"]
+    resolved_collection = resolve_eodag_collection(collection, product_id)
+    if provider == "cop_dataspace" and resolved_collection not in _cop_dataspace_known_product_types():
+        return None
     dag = EODataAccessGateway()
     results = dag.search(
         provider=provider,
-        collection=collection,
+        collection=resolved_collection,
         id=product_id
     )
     return results[0]
@@ -91,6 +165,19 @@ def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eoda
     return s3_target
 
 
+def _common_zip_prefix(names):
+    # Same technique as rolling-archive-worker's _detect_common_prefix(): SAFE
+    # zips nest every entry under one top-level "<name>.SAFE/" dir.
+    file_names = [n for n in names if not n.endswith("/")]
+    if not file_names:
+        return ""
+    first_segment = file_names[0].split("/", 1)
+    if len(first_segment) < 2:
+        return ""
+    candidate = first_segment[0] + "/"
+    return candidate if all(n.startswith(candidate) for n in file_names) else ""
+
+
 def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
              s3_bucket="eodag", target_provider="cop_dataspace_s3",
              CHUNK_SIZE=8388608):
@@ -112,10 +199,19 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
         s3.download_file(s3_bucket, zip_product, local_zip)
 
         with zipfile.ZipFile(local_zip, "r") as z:
-            for name in z.namelist():
+            names = z.namelist()
+            # TODO: S2 keeps the un-stripped key shape for now, pending review
+            # by whoever owns the S2 pipeline -- every other collection below
+            # strips the zip's common top-level directory (e.g. "PRODUCT.SAFE/")
+            # to match Rolling Archive's real per-asset convention. Switch S2
+            # over once nothing downstream is confirmed to depend on the
+            # current shape.
+            common_prefix = "" if collection in ["S2_MSI_L1C", "S2_MSI_L2A"] else _common_zip_prefix(names)
+            for name in names:
                 if name.endswith("/"):
                     continue
-                s3_target = f"{target_provider}/{collection}/{item_id}/{name}"
+                relative_path = name[len(common_prefix):] if common_prefix else name
+                s3_target = f"{target_provider}/{collection}/{item_id}/{relative_path}"
                 with z.open(name) as member:
                     s3.upload_fileobj(
                         member,
@@ -128,10 +224,12 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
 
 def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
+    if not provider:
+        provider = os.environ["PROVIDER"]
 
-    if collection == "S1_SAR_GRD":
-        s3_bucket = "eodag"
-        _provider = os.environ.get("PROVIDER", "cop_dataspace")
+    # Multi-provider fallback, downloadLink only -- per-asset requests use
+    # "cop_dataspace_s3" and fall through to the standard dispatch below.
+    if collection == "S1_SAR_GRD" and provider == "cop_dataspace":
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
         dag = EODataAccessGateway()
         results = dag.search(collection=collection, id=product_id, raise_errors=False)
@@ -139,28 +237,45 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product = results[0]
             if product.provider == "nasa":
                 url = get_asf_result(product_id=product_id)
-                stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=_provider)
+                stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=provider)
             else:
-                stream_eodag_s3(s3, product, provider=_provider, S3_BUCKET=s3_bucket)
+                stream_eodag_s3(s3, product, provider=provider, S3_BUCKET=s3_bucket)
             print("Uploaded product!")
             return
         raise Exception("S1_SAR_GRD: all providers failed")
 
-    if not provider:
-        provider = os.environ["PROVIDER"]
     if provider in ["cop_dataspace"]:
         product = get_eodag_result()
-        zip_product = stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
-        open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
-    elif provider in ["cop_dataspace_s3"]:
-        product = get_cop_dataspace_s3_result()
-        if product:
-            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
+        if product is not None:
+            zip_product = stream_eodag_s3(s3, product, S3_BUCKET=s3_bucket)
+            if zip_product.endswith(".zip"):
+                open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
         else:
-            print("Product not found. Trying cop_dataspace instead...")
-            product = get_eodag_result(provider="cop_dataspace")
-            zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
-            open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
+            product, real_filename = get_cop_dataspace_s3_whole_product_result()
+            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename)
+    elif provider in ["cop_dataspace_s3"]:
+        # S2 keeps its existing dedicated resolver; every other collection
+        # uses the generic OData-driven one.
+        if collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
+            product = get_cop_dataspace_s3_result()
+            if product:
+                stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
+            else:
+                print("Product not found. Trying cop_dataspace instead...")
+                product = get_eodag_result(provider="cop_dataspace")
+                zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
+                if zip_product.endswith(".zip"):
+                    open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
+        else:
+            result = get_cop_dataspace_s3_asset_result()
+            if result is None:
+                # Genuinely no such asset (e.g. a bogus/typo'd name) -- not an
+                # application error, so this DAG run completes cleanly instead
+                # of surfacing as a failed task.
+                print(f"Asset not found: collection={collection} item_id={os.environ.get('ITEM_ID')} product_id={os.environ.get('PRODUCT_ID')}")
+                return
+            product, real_relative_path = result
+            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_relative_path)
     elif provider in ["cop_ads", "cop_cds", "cop_ewds"]:
         product = get_cds_result()
         if not product:
