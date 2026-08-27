@@ -267,7 +267,14 @@ def access(s3, provider=None, s3_bucket="eodag"):
                 if zip_product.endswith(".zip"):
                     open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
         else:
-            product, real_relative_path = get_cop_dataspace_s3_asset_result()
+            result = get_cop_dataspace_s3_asset_result()
+            if result is None:
+                # Genuinely no such asset (e.g. a bogus/typo'd name) -- not an
+                # application error, so this DAG run completes cleanly instead
+                # of surfacing as a failed task.
+                print(f"Asset not found: collection={collection} item_id={os.environ.get('ITEM_ID')} product_id={os.environ.get('PRODUCT_ID')}")
+                return
+            product, real_relative_path = result
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_relative_path)
     elif provider in ["cop_ads", "cop_cds", "cop_ewds"]:
         product = get_cds_result()

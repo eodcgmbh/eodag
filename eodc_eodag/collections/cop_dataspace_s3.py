@@ -96,7 +96,9 @@ def get_cop_dataspace_s3_whole_product_result(item_id=None):
 def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
     # Mission-agnostic per-asset resolver: looks up the product's real S3
     # folder via OData (no per-mission path-building needed) and matches the
-    # requested asset by filename.
+    # requested asset by filename. Returns None (not an error) when the
+    # asset genuinely doesn't exist -- a bogus/typo'd name is a normal
+    # "not found" outcome, not a system failure.
     if not product_id:
         product_id = os.environ["PRODUCT_ID"]
     if not item_id:
@@ -118,7 +120,7 @@ def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
                 relative_path = key[len(prefix):]  # real internal path, e.g. "preview/quick-look.png"
                 break
         else:
-            raise ValueError(f"Could not find asset {asset_name!r} under {prefix}")
+            return None
 
     stream = s3_aws.get_object(Bucket="eodata", Key=key)["Body"]
     return stream, relative_path
