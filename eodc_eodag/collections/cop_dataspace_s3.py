@@ -108,9 +108,13 @@ def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
     key_or_prefix = _lookup_s3path(item_id)
 
     s3_aws = aws()
-    if key_or_prefix.split("/")[-1] == asset_name:
+    basename = key_or_prefix.split("/")[-1]
+    # CDSE_FIXED_ASSETS' single-file collections request a generic
+    # extension-only label (e.g. "TGZ", "EOF", "nc") rather than the real
+    # filename -- accept either form.
+    if basename == asset_name or basename.rsplit(".", 1)[-1] == asset_name:
         key = key_or_prefix  # single-file product: S3Path already is the key
-        relative_path = asset_name
+        relative_path = basename
     else:
         prefix = key_or_prefix + "/"
         listing = s3_aws.list_objects_v2(Bucket="eodata", Prefix=prefix, MaxKeys=1000)
