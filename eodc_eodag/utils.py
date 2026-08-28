@@ -141,7 +141,9 @@ def get_eodag_result(product_id=None, provider=None, collection=None):
         collection=resolved_collection,
         id=product_id
     )
-    return results[0]
+    # A known product type doesn't guarantee eodag's search finds this exact
+    # id -- fall back to the OData-direct path instead of crashing.
+    return results[0] if results else None
 
 
 def stream_eodag_s3(s3, product, provider=None, collection=None, S3_BUCKET="eodag", CHUNK_SIZE=8388608, item_id=None):
