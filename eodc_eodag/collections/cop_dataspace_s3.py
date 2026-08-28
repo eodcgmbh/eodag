@@ -115,7 +115,11 @@ def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
         prefix = key_or_prefix + "/"
         listing = s3_aws.list_objects_v2(Bucket="eodata", Prefix=prefix, MaxKeys=1000)
         for content in listing.get("Contents", []):
-            if content["Key"].split("/")[-1] == asset_name:
+            basename = content["Key"].split("/")[-1]
+            # eodag-server's own STAC catalog strips the real mission-prefix
+            # off some real filenames (e.g. real "s1-product-preview.xsd" is
+            # reported as just "product-preview.xsd") -- accept either form.
+            if basename == asset_name or basename.endswith(f"-{asset_name}"):
                 key = content["Key"]
                 relative_path = key[len(prefix):]  # real internal path, e.g. "preview/quick-look.png"
                 break
