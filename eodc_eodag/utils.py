@@ -1,4 +1,5 @@
 import functools
+import io
 import os
 import boto3
 import eodag as _eodag_pkg
@@ -180,6 +181,17 @@ def _common_zip_prefix(names):
     return candidate if all(n.startswith(candidate) for n in file_names) else ""
 
 
+def _strip_archive_suffix(product_name):
+    # Matches rolling-archive-worker's s3_key.build_key(): the real per-asset
+    # prefix is keyed on the product's bare identifier, not its directory-ish
+    # CDSE name (".SAFE"/".SEN3" is the archive's own directory suffix, not
+    # part of the identifier RA's and HDA's own conventions use).
+    for suffix in (".SAFE", ".SEN3"):
+        if product_name.endswith(suffix):
+            return product_name[: -len(suffix)]
+    return product_name
+
+
 def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
              s3_bucket="eodag", target_provider="cop_dataspace_s3",
              CHUNK_SIZE=8388608):
@@ -192,6 +204,7 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
         collection = os.environ["COLLECTION"]
     if not item_id:
         item_id = os.environ["ITEM_ID"]
+    identifier = _strip_archive_suffix(item_id)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         local_zip = os.path.join(tmpdir, f"{item_id}.zip")
@@ -213,7 +226,7 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
                 if name.endswith("/"):
                     continue
                 relative_path = name[len(common_prefix):] if common_prefix else name
-                s3_target = f"{target_provider}/{collection}/{item_id}/{relative_path}"
+                s3_target = f"{target_provider}/{collection}/{identifier}/{relative_path}"
                 with z.open(name) as member:
                     s3.upload_fileobj(
                         member,
@@ -222,6 +235,17 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
                         Config=boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE),
                     )
                 print(f"Unzipped: {s3_target}")
+
+        # Written only once every file has uploaded successfully -- the single
+        # existence check for "is this product's asset mirror complete",
+        # matching rolling-archive-worker's build_asset_mirror_marker_key
+        # convention exactly, so HDA's existing resolver (which already
+        # special-cases this marker) recognizes an on-demand-ingested product
+        # the same way it recognizes one Rolling Archive mirrored on its own
+        # schedule -- no changes needed on the serving side.
+        marker_key = f"{target_provider}/{collection}/{identifier}/_asset_mirror_complete"
+        s3.upload_fileobj(io.BytesIO(b""), Bucket=s3_bucket, Key=marker_key)
+        print(f"Marked complete: {marker_key}")
 
 
 def access(s3, provider=None, s3_bucket="eodag"):
@@ -256,18 +280,31 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product, real_filename = get_cop_dataspace_s3_whole_product_result()
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename)
     elif provider in ["cop_dataspace_s3"]:
-        # S2 keeps its existing dedicated resolver; every other collection
-        # uses the generic OData-driven one.
-        if collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
-            product = get_cop_dataspace_s3_result()
-            if product:
-                stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket)
+        # On-demand requests used to fetch exactly the one requested asset.
+        # Changed to always fetch+extract the whole product instead (same
+        # ZIP-based approach Rolling Archive's own bulk ingestion already
+        # uses, see rolling_archive_worker.asset_extract) -- a single asset
+        # request (including a bogus/sidecar-probe name) is itself evidence
+        # the product is worth having in full, and extracting it once makes
+        # every subsequent asset request for this product a local Ceph
+        # lookup instead of relying on a live, occasionally slow/unreliable
+        # per-asset existence check (see ACM26-260/261).
+        product = get_eodag_result(provider="cop_dataspace")
+        if product is not None:
+            zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
+            if zip_product.endswith(".zip"):
+                open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
             else:
-                print("Product not found. Trying cop_dataspace instead...")
-                product = get_eodag_result(provider="cop_dataspace")
-                zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
-                if zip_product.endswith(".zip"):
-                    open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
+                print(f"{zip_product} is not a ZIP archive -- single file already uploaded, nothing to extract")
+        # eodag has no product-type registration for this exact id (rare) --
+        # fall back to resolving the single requested asset directly via
+        # CDSE's own S3-exposed OData listing, same as before this change.
+        elif collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
+            fallback_product = get_cop_dataspace_s3_result()
+            if fallback_product:
+                stream_cop_dataspace_s3(s3, fallback_product, S3_BUCKET=s3_bucket)
+            else:
+                print(f"Could not resolve product via eodag or direct S3 lookup for item {os.environ.get('ITEM_ID')}")
         else:
             result = get_cop_dataspace_s3_asset_result()
             if result is None:
@@ -276,8 +313,8 @@ def access(s3, provider=None, s3_bucket="eodag"):
                 # of surfacing as a failed task.
                 print(f"Asset not found: collection={collection} item_id={os.environ.get('ITEM_ID')} product_id={os.environ.get('PRODUCT_ID')}")
                 return
-            product, real_relative_path = result
-            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_relative_path)
+            fallback_product, real_relative_path = result
+            stream_cop_dataspace_s3(s3, fallback_product, S3_BUCKET=s3_bucket, real_key=real_relative_path)
     elif provider in ["cop_ads", "cop_cds", "cop_ewds"]:
         product = get_cds_result()
         if not product:
