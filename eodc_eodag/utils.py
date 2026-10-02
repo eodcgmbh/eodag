@@ -278,7 +278,13 @@ def access(s3, provider=None, s3_bucket="eodag"):
             if zip_product.endswith(".zip"):
                 open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
             else:
-                print(f"{zip_product} is not a ZIP archive -- single file already uploaded, nothing to extract")
+                # Not zipped (e.g. AUX orbit files) -- stream_eodag_s3 uploaded
+                # it under the "cop_dataspace" prefix; this backend's resolver
+                # looks under "cop_dataspace_s3", so copy it there too.
+                filename = zip_product.rsplit("/", 1)[-1]
+                target_key = f"cop_dataspace_s3/{collection}/{os.environ['ITEM_ID']}/{filename}"
+                s3.copy_object(Bucket=s3_bucket, CopySource={"Bucket": s3_bucket, "Key": zip_product}, Key=target_key)
+                print(f"Copied to: {target_key}")
         # No eodag product-type registration for this id -- fall back to
         # the direct per-asset resolvers (pre-existing behavior).
         elif collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
