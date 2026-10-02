@@ -233,7 +233,7 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
                     )
                 print(f"Unzipped: {s3_target}")
 
-        # Marks the product complete, matching Rolling Archive's own convention.
+        # Marks the product complete.
         marker_key = f"{target_provider}/{collection}/{identifier}/_asset_mirror_complete"
         s3.upload_fileobj(io.BytesIO(b""), Bucket=s3_bucket, Key=marker_key)
         print(f"Marked complete: {marker_key}")
@@ -271,8 +271,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product, real_filename = get_cop_dataspace_s3_whole_product_result()
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename)
     elif provider in ["cop_dataspace_s3"]:
-        # Always fetch+extract the whole product, not just the one asset
-        # requested -- matches Rolling Archive's own ingestion approach.
+        # Always fetch+extract the whole product, not just the one asset requested.
         product = get_eodag_result(provider="cop_dataspace")
         if product is not None:
             zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
