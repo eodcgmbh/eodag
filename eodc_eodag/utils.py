@@ -1,6 +1,7 @@
 import functools
 import io
 import os
+import re
 import boto3
 import eodag as _eodag_pkg
 import requests
@@ -13,12 +14,17 @@ from .collections.cds_access import get_cds_result, stream_cds_s3
 from .collections.cop_dataspace_s3 import (
     get_cop_dataspace_s3_result,
     get_cop_dataspace_s3_asset_result,
+    get_cop_dataspace_s3_quicklook_result,
     get_cop_dataspace_s3_whole_product_result,
     stream_cop_dataspace_s3,
 )
 from .collections.earthdata_access import get_earthdata_result, stream_earthdata_s3
 from .collections.maap_access import get_maap_result, stream_maap_s3
 from .collections.asf_access import get_asf_result, stream_asf_s3
+
+# Real thumbnail filenames (verified against live STAC items): ql.jpg,
+# quicklook.jpg, quick-look.png, thumbnail.png.
+THUMBNAIL_PRODUCT_ID_PATTERN = re.compile(r"^(ql|preview|quick-?look|thumbnail)\.(jpg|jpeg|png)$", re.IGNORECASE)
 
 
 def _normalize_product_id(pid: str) -> str:
@@ -271,6 +277,17 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product, real_filename = get_cop_dataspace_s3_whole_product_result()
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename)
     elif provider in ["cop_dataspace_s3"]:
+        product_id = os.environ.get("PRODUCT_ID", "")
+        if THUMBNAIL_PRODUCT_ID_PATTERN.match(product_id):
+            # Small, separate CDSE asset -- not worth a whole-product fetch.
+            result = get_cop_dataspace_s3_quicklook_result()
+            if result is None:
+                print(f"No quicklook found for item {os.environ.get('ITEM_ID')}")
+                return
+            stream, filename = result
+            stream_cop_dataspace_s3(s3, stream, S3_BUCKET=s3_bucket, real_key=filename)
+            print("Uploaded product!")
+            return
         # Always fetch+extract the whole product, not just the one asset requested.
         product = get_eodag_result(provider="cop_dataspace")
         if product is not None:

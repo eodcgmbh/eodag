@@ -93,6 +93,33 @@ def get_cop_dataspace_s3_whole_product_result(item_id=None):
     return stream, filename
 
 
+def get_cop_dataspace_s3_quicklook_result(item_id=None):
+    # Thumbnails are a tiny, separate CDSE asset (Type=="QUICKLOOK"), fetched
+    # directly instead of the whole product ZIP.
+    if not item_id:
+        item_id = os.environ["ITEM_ID"]
+
+    response = requests.get(
+        f"{CATALOGUE_URL}/Products",
+        params={"$filter": f"contains(Name,'{item_id}')", "$top": 1, "$expand": "Assets"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    results = response.json().get("value", [])
+    if not results:
+        return None
+    quicklook = next((a for a in results[0].get("Assets", []) if a.get("Type") == "QUICKLOOK"), None)
+    if not quicklook:
+        return None
+
+    key = quicklook["S3Path"].removeprefix("/eodata/")
+    filename = key.rsplit("/", 1)[-1]
+
+    s3_aws = aws()
+    stream = s3_aws.get_object(Bucket="eodata", Key=key)["Body"]
+    return stream, filename
+
+
 def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
     # Mission-agnostic per-asset resolver: looks up the product's real S3
     # folder via OData (no per-mission path-building needed) and matches the
