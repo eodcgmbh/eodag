@@ -2,10 +2,7 @@ import io
 import zipfile
 from unittest.mock import MagicMock
 
-import boto3.s3.transfer  # noqa: F401 -- registers boto3.s3.transfer as an
-# attribute of the `boto3` module, same as eodag's own import chain does in
-# production; without this, `boto3.s3.transfer.TransferConfig` (used by
-# open_zip/stream_eodag_s3) raises AttributeError under plain `import boto3`.
+import boto3.s3.transfer  # noqa: F401 -- needed for boto3.s3.transfer.TransferConfig
 import pytest
 
 from eodc_eodag import utils
@@ -42,8 +39,7 @@ def _make_zip_bytes(names_and_contents):
 
 @pytest.fixture
 def mock_s3():
-    """A fake boto3 S3 client: download_file writes the zip to disk,
-    upload_fileobj records every uploaded key."""
+    """Fake S3 client: download_file writes the zip, upload_fileobj records keys."""
     s3 = MagicMock()
     uploaded = {}
 
@@ -99,8 +95,7 @@ def test_open_zip_keeps_s2_un_stripped_key_shape(mock_s3):
     )
 
     keys = set(mock_s3.uploaded.keys())
-    # S2 deliberately keeps the un-stripped internal zip path (see TODO in
-    # open_zip), only the item_id-level prefix gets the suffix-stripped id.
+    # S2 keeps the un-stripped internal zip path; only the prefix is stripped.
     assert "cop_dataspace_s3/S2_MSI_L2A/S2_PRODUCT/S2_PRODUCT.SAFE/MTD_MSIL2A.xml" in keys
     assert "cop_dataspace_s3/S2_MSI_L2A/S2_PRODUCT/_asset_mirror_complete" in keys
 
@@ -134,7 +129,7 @@ def test_access_cop_dataspace_s3_prefers_whole_product_fetch(base_env, monkeypat
     get_eodag_result.assert_called_once_with(provider="cop_dataspace")
     stream_eodag_s3.assert_called_once()
     open_zip.assert_called_once()
-    # The per-asset fallback must not be exercised when eodag resolves a product.
+    # Per-asset fallback must not run when eodag resolves a product.
     get_cop_dataspace_s3_asset_result.assert_not_called()
 
 
@@ -165,6 +160,5 @@ def test_access_cop_dataspace_s3_does_not_fail_on_bogus_asset(base_env, monkeypa
     monkeypatch.setattr(utils, "get_eodag_result", MagicMock(return_value=None))
     monkeypatch.setattr(utils, "get_cop_dataspace_s3_asset_result", MagicMock(return_value=None))
 
-    # Must complete cleanly (return), not raise -- a bogus/typo'd asset name
-    # is a normal outcome, not an application error.
+    # A bogus asset name must return cleanly, not raise.
     utils.access(MagicMock(), s3_bucket="mybucket")

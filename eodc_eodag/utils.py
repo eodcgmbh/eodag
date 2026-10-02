@@ -182,10 +182,7 @@ def _common_zip_prefix(names):
 
 
 def _strip_archive_suffix(product_name):
-    # Matches rolling-archive-worker's s3_key.build_key(): the real per-asset
-    # prefix is keyed on the product's bare identifier, not its directory-ish
-    # CDSE name (".SAFE"/".SEN3" is the archive's own directory suffix, not
-    # part of the identifier RA's and HDA's own conventions use).
+    # ".SAFE"/".SEN3" is the archive's directory suffix, not the identifier.
     for suffix in (".SAFE", ".SEN3"):
         if product_name.endswith(suffix):
             return product_name[: -len(suffix)]
@@ -236,13 +233,7 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
                     )
                 print(f"Unzipped: {s3_target}")
 
-        # Written only once every file has uploaded successfully -- the single
-        # existence check for "is this product's asset mirror complete",
-        # matching rolling-archive-worker's build_asset_mirror_marker_key
-        # convention exactly, so HDA's existing resolver (which already
-        # special-cases this marker) recognizes an on-demand-ingested product
-        # the same way it recognizes one Rolling Archive mirrored on its own
-        # schedule -- no changes needed on the serving side.
+        # Marks the product complete, matching Rolling Archive's own convention.
         marker_key = f"{target_provider}/{collection}/{identifier}/_asset_mirror_complete"
         s3.upload_fileobj(io.BytesIO(b""), Bucket=s3_bucket, Key=marker_key)
         print(f"Marked complete: {marker_key}")
@@ -280,15 +271,8 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product, real_filename = get_cop_dataspace_s3_whole_product_result()
             stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename)
     elif provider in ["cop_dataspace_s3"]:
-        # On-demand requests used to fetch exactly the one requested asset.
-        # Changed to always fetch+extract the whole product instead (same
-        # ZIP-based approach Rolling Archive's own bulk ingestion already
-        # uses, see rolling_archive_worker.asset_extract) -- a single asset
-        # request (including a bogus/sidecar-probe name) is itself evidence
-        # the product is worth having in full, and extracting it once makes
-        # every subsequent asset request for this product a local Ceph
-        # lookup instead of relying on a live, occasionally slow/unreliable
-        # per-asset existence check (see ACM26-260/261).
+        # Always fetch+extract the whole product, not just the one asset
+        # requested -- matches Rolling Archive's own ingestion approach.
         product = get_eodag_result(provider="cop_dataspace")
         if product is not None:
             zip_product = stream_eodag_s3(s3, product, provider="cop_dataspace", S3_BUCKET=s3_bucket)
@@ -296,9 +280,8 @@ def access(s3, provider=None, s3_bucket="eodag"):
                 open_zip(s3=s3, zip_product=zip_product, provider="cop_dataspace", s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
             else:
                 print(f"{zip_product} is not a ZIP archive -- single file already uploaded, nothing to extract")
-        # eodag has no product-type registration for this exact id (rare) --
-        # fall back to resolving the single requested asset directly via
-        # CDSE's own S3-exposed OData listing, same as before this change.
+        # No eodag product-type registration for this id -- fall back to
+        # the direct per-asset resolvers (pre-existing behavior).
         elif collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
             fallback_product = get_cop_dataspace_s3_result()
             if fallback_product:
