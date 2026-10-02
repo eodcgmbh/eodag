@@ -112,6 +112,27 @@ def base_env(monkeypatch):
     monkeypatch.setenv("PRODUCT_ID", "S1_radiance_an.nc")
 
 
+def test_access_cop_dataspace_s3_copies_non_zip_result_to_the_right_prefix(base_env, monkeypatch):
+    """A non-zip single file (e.g. AUX orbit file) lands under
+    cop_dataspace_s3, not the cop_dataspace prefix stream_eodag_s3 uploaded
+    it to -- otherwise this backend's resolver never finds it."""
+    fake_product = object()
+    mock_s3 = MagicMock()
+    monkeypatch.setattr(utils, "get_eodag_result", MagicMock(return_value=fake_product))
+    monkeypatch.setattr(
+        utils, "stream_eodag_s3",
+        MagicMock(return_value="cop_dataspace/S1_AUX/S3A_SL_1_RBT____X/orbitfile.EOF"),
+    )
+
+    utils.access(mock_s3, s3_bucket="mybucket")
+
+    mock_s3.copy_object.assert_called_once_with(
+        Bucket="mybucket",
+        CopySource={"Bucket": "mybucket", "Key": "cop_dataspace/S1_AUX/S3A_SL_1_RBT____X/orbitfile.EOF"},
+        Key="cop_dataspace_s3/S3_SLSTR/S3A_SL_1_RBT____X/orbitfile.EOF",
+    )
+
+
 def test_access_cop_dataspace_s3_fetches_thumbnail_directly(base_env, monkeypatch):
     monkeypatch.setenv("PRODUCT_ID", "ql.jpg")
     fake_stream = object()
