@@ -93,9 +93,14 @@ def get_cop_dataspace_s3_whole_product_result(item_id=None):
     return stream, filename
 
 
+_THUMBNAIL_FILENAME_PATTERN = re.compile(r"^(ql|preview|quick-?look|thumbnail)\.(jpg|jpeg|png)$", re.IGNORECASE)
+
+
 def get_cop_dataspace_s3_quicklook_result(item_id=None):
     # Thumbnails are a tiny, separate CDSE asset (Type=="QUICKLOOK"), fetched
-    # directly instead of the whole product ZIP.
+    # directly instead of the whole product ZIP. The Assets entry's own
+    # S3Path is just the product's directory (identical to the main
+    # product's), not the file itself -- list it and match the real name.
     if not item_id:
         item_id = os.environ["ITEM_ID"]
 
@@ -112,12 +117,15 @@ def get_cop_dataspace_s3_quicklook_result(item_id=None):
     if not quicklook:
         return None
 
-    key = quicklook["S3Path"].removeprefix("/eodata/")
-    filename = key.rsplit("/", 1)[-1]
-
+    prefix = quicklook["S3Path"].removeprefix("/eodata/") + "/"
     s3_aws = aws()
-    stream = s3_aws.get_object(Bucket="eodata", Key=key)["Body"]
-    return stream, filename
+    listing = s3_aws.list_objects_v2(Bucket="eodata", Prefix=prefix, MaxKeys=1000)
+    for content in listing.get("Contents", []):
+        basename = content["Key"].rsplit("/", 1)[-1]
+        if _THUMBNAIL_FILENAME_PATTERN.match(basename):
+            stream = s3_aws.get_object(Bucket="eodata", Key=content["Key"])["Body"]
+            return stream, basename
+    return None
 
 
 def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
