@@ -112,6 +112,33 @@ def base_env(monkeypatch):
     monkeypatch.setenv("PRODUCT_ID", "S1_radiance_an.nc")
 
 
+def test_access_cop_dataspace_s3_fetches_thumbnail_directly(base_env, monkeypatch):
+    monkeypatch.setenv("PRODUCT_ID", "ql.jpg")
+    fake_stream = object()
+    get_cop_dataspace_s3_quicklook_result = MagicMock(return_value=(fake_stream, "ql.jpg"))
+    stream_cop_dataspace_s3 = MagicMock()
+    get_eodag_result = MagicMock()
+
+    monkeypatch.setattr(utils, "get_cop_dataspace_s3_quicklook_result", get_cop_dataspace_s3_quicklook_result)
+    monkeypatch.setattr(utils, "stream_cop_dataspace_s3", stream_cop_dataspace_s3)
+    monkeypatch.setattr(utils, "get_eodag_result", get_eodag_result)
+
+    utils.access(MagicMock(), s3_bucket="mybucket")
+
+    get_cop_dataspace_s3_quicklook_result.assert_called_once()
+    stream_cop_dataspace_s3.assert_called_once()
+    assert stream_cop_dataspace_s3.call_args.kwargs["real_key"] == "ql.jpg"
+    # Must not fetch the whole product for a thumbnail request.
+    get_eodag_result.assert_not_called()
+
+
+def test_access_cop_dataspace_s3_thumbnail_missing_returns_cleanly(base_env, monkeypatch):
+    monkeypatch.setenv("PRODUCT_ID", "quicklook.jpg")
+    monkeypatch.setattr(utils, "get_cop_dataspace_s3_quicklook_result", MagicMock(return_value=None))
+
+    utils.access(MagicMock(), s3_bucket="mybucket")
+
+
 def test_access_cop_dataspace_s3_prefers_whole_product_fetch(base_env, monkeypatch):
     fake_product = object()
     get_eodag_result = MagicMock(return_value=fake_product)
