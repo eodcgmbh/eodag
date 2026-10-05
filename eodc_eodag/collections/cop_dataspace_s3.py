@@ -93,43 +93,6 @@ def get_cop_dataspace_s3_whole_product_result(item_id=None):
     return stream, filename
 
 
-def get_cop_dataspace_s3_quicklook_result(product_id=None, item_id=None):
-    # Thumbnails are a tiny, separate CDSE asset (Type=="QUICKLOOK"), fetched
-    # directly instead of the whole product ZIP. The Assets entry's own
-    # S3Path is just the product's directory (identical to the main
-    # product's), not the file itself -- list it and match the exact
-    # requested name (some collections, e.g. S1 SAR, have more than one real
-    # thumbnail file -- matching "any thumbnail-looking name" would risk
-    # serving the wrong one).
-    if not item_id:
-        item_id = os.environ["ITEM_ID"]
-    if not product_id:
-        product_id = os.environ["PRODUCT_ID"]
-
-    response = requests.get(
-        f"{CATALOGUE_URL}/Products",
-        params={"$filter": f"contains(Name,'{item_id}')", "$top": 1, "$expand": "Assets"},
-        timeout=30,
-    )
-    response.raise_for_status()
-    results = response.json().get("value", [])
-    if not results:
-        return None
-    quicklook = next((a for a in results[0].get("Assets", []) if a.get("Type") == "QUICKLOOK"), None)
-    if not quicklook:
-        return None
-
-    prefix = quicklook["S3Path"].removeprefix("/eodata/") + "/"
-    s3_aws = aws()
-    listing = s3_aws.list_objects_v2(Bucket="eodata", Prefix=prefix, MaxKeys=1000)
-    for content in listing.get("Contents", []):
-        basename = content["Key"].rsplit("/", 1)[-1]
-        if basename.lower() == product_id.lower():
-            stream = s3_aws.get_object(Bucket="eodata", Key=content["Key"])["Body"]
-            return stream, basename
-    return None
-
-
 def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
     # Mission-agnostic per-asset resolver: looks up the product's real S3
     # folder via OData (no per-mission path-building needed) and matches the
