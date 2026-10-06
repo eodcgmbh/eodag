@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from eodc_eodag.collections.cop_dataspace_s3 import get_cop_dataspace_s3_asset_result
+from eodc_eodag.collections.cop_dataspace_s3 import get_cop_dataspace_s3_asset_result, get_cop_dataspace_s3_result
 
 
 def _lookup_response(s3path):
@@ -55,6 +55,43 @@ def test_explicit_asset_name_still_matches_by_extension(mock_get, mock_aws):
     stream, relative_path = get_cop_dataspace_s3_asset_result(product_id=f"{item_id}_EOF", item_id=item_id)
 
     assert relative_path == f"{item_id}.EOF"
+
+
+@patch("eodc_eodag.collections.cop_dataspace_s3.aws")
+def test_get_cop_dataspace_s3_result_lists_every_real_file(mock_aws):
+    item_id = "S2A_MSIL2A_20240921T235231_N0511_R130_T55GFP_20240922T020450"
+    safe_prefix = f"Sentinel-2/MSI/L2A/2024/09/21/{item_id}.SAFE/"
+    keys = [
+        f"{safe_prefix}MTD_MSIL2A.xml",
+        f"{safe_prefix}GRANULE/L2A_T55GFP_A048318_20240921T235633/IMG_DATA/R10m/T55GFP_20240921T235231_B04_10m.jp2",
+    ]
+    mock_s3 = MagicMock()
+    mock_paginator = MagicMock()
+    mock_paginator.paginate.return_value = [{"Contents": [{"Key": k} for k in keys]}]
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_aws.return_value = mock_s3
+
+    result = get_cop_dataspace_s3_result(item_id=item_id)
+
+    assert result == [
+        (keys[0], f"{item_id}.SAFE/MTD_MSIL2A.xml"),
+        (keys[1], f"{item_id}.SAFE/GRANULE/L2A_T55GFP_A048318_20240921T235633/IMG_DATA/R10m/T55GFP_20240921T235231_B04_10m.jp2"),
+    ]
+
+
+@patch("eodc_eodag.collections.cop_dataspace_s3.aws")
+def test_get_cop_dataspace_s3_result_returns_none_when_empty(mock_aws):
+    mock_s3 = MagicMock()
+    mock_paginator = MagicMock()
+    mock_paginator.paginate.return_value = [{"Contents": []}]
+    mock_s3.get_paginator.return_value = mock_paginator
+    mock_aws.return_value = mock_s3
+
+    result = get_cop_dataspace_s3_result(
+        item_id="S2A_MSIL2A_20240921T235231_N0511_R130_T55GFP_20240922T020450"
+    )
+
+    assert result is None
 
 
 @patch("eodc_eodag.collections.cop_dataspace_s3.aws")

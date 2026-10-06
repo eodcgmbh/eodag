@@ -11,6 +11,7 @@ from tqdm.auto import tqdm
 
 from .collections.cds_access import get_cds_result, stream_cds_s3
 from .collections.cop_dataspace_s3 import (
+    aws,
     get_cop_dataspace_s3_result,
     get_cop_dataspace_s3_asset_result,
     get_cop_dataspace_s3_whole_product_result,
@@ -290,11 +291,18 @@ def access(s3, provider=None, s3_bucket="eodag"):
         # No eodag product-type registration for this id -- fall back to
         # the direct per-asset resolvers (pre-existing behavior).
         elif collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
-            fallback_product = get_cop_dataspace_s3_result()
-            if fallback_product:
-                stream_cop_dataspace_s3(s3, fallback_product, S3_BUCKET=s3_bucket)
-            else:
+            files = get_cop_dataspace_s3_result()
+            if not files:
                 print(f"Could not resolve product via eodag or direct S3 lookup for item {os.environ.get('ITEM_ID')}")
+                return
+            s3_cdse = aws()
+            item_id = os.environ["ITEM_ID"]
+            for real_key, relative_path in files:
+                stream = s3_cdse.get_object(Bucket="eodata", Key=real_key)["Body"]
+                stream_cop_dataspace_s3(s3, stream, S3_BUCKET=s3_bucket, real_key=relative_path)
+            marker_key = f"{provider}/{collection}/{item_id}/_asset_mirror_complete"
+            s3.upload_fileobj(io.BytesIO(b""), Bucket=s3_bucket, Key=marker_key)
+            print(f"Marked complete: {marker_key}")
         else:
             result = get_cop_dataspace_s3_asset_result()
             if result is None:
