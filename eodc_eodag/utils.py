@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from .collections.cds_access import get_cds_result, stream_cds_s3
 from .collections.cop_dataspace_s3 import (
     aws,
-    get_cop_dataspace_s3_result,
+    get_cop_dataspace_s3_folder_result,
     get_cop_dataspace_s3_asset_result,
     get_cop_dataspace_s3_whole_product_result,
     stream_cop_dataspace_s3,
@@ -240,6 +240,51 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
         print(f"Marked complete: {marker_key}")
 
 
+def _mirror_whole_folder(s3, s3_bucket, provider, collection, item_id, CHUNK_SIZE=8388608):
+    # Mirrors every real file under a folder-based (.SAFE/.SEN3) product that
+    # eodag has no product-type registration for (e.g. ETAD's measurement/
+    # annotation/preview/support layout) -- same approach as open_zip(), just
+    # reading the real files directly from CDSE instead of from a local zip.
+    # Also builds the zip itself for downloadLink, under "cop_dataspace" --
+    # mirrors the registered-product flow, which always produces both a zip
+    # (open_zip()'s input) and per-asset files (its output) in one run,
+    # regardless of which request actually triggered the DAG.
+    import tempfile
+    import zipfile
+
+    files = get_cop_dataspace_s3_folder_result(item_id)
+    if not files:
+        print(f"Could not resolve product via direct S3 lookup for item {item_id}")
+        return False
+    s3_cdse = aws()
+    identifier = item_id.replace(".SAFE", "")
+    transfer_config = boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, f"{identifier}.zip")
+        member_path = os.path.join(tmpdir, "_member")
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for real_key, relative_path in files:
+                s3_cdse.download_file("eodata", real_key, member_path)
+                with open(member_path, "rb") as f:
+                    stream_cop_dataspace_s3(
+                        s3, f, S3_BUCKET=s3_bucket, provider=provider, collection=collection,
+                        item_id=item_id, real_key=relative_path,
+                    )
+                zf.write(member_path, arcname=relative_path)
+                os.remove(member_path)
+
+        zip_target = f"cop_dataspace/{collection}/{identifier}/{identifier}.zip"
+        with open(zip_path, "rb") as zf_stream:
+            s3.upload_fileobj(zf_stream, Bucket=s3_bucket, Key=zip_target, Config=transfer_config)
+        print(f"Uploaded zip: {zip_target}")
+
+    marker_key = f"{provider}/{collection}/{item_id}/_asset_mirror_complete"
+    s3.upload_fileobj(io.BytesIO(b""), Bucket=s3_bucket, Key=marker_key)
+    print(f"Marked complete: {marker_key}")
+    return True
+
+
 def access(s3, provider=None, s3_bucket="eodag"):
     collection = os.environ.get("COLLECTION", "")
     if not provider:
@@ -247,6 +292,9 @@ def access(s3, provider=None, s3_bucket="eodag"):
 
     # Multi-provider fallback, downloadLink only -- per-asset requests use
     # "cop_dataspace_s3" and fall through to the standard dispatch below.
+    # Shares its Airflow run with those per-asset requests (same item_id,
+    # same dag_run_id), so it must also unzip here -- there's no second run
+    # coming to do it once this one is marked "success".
     if collection == "S1_SAR_GRD" and provider == "cop_dataspace":
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
         dag = EODataAccessGateway()
@@ -255,9 +303,11 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product = results[0]
             if product.provider == "nasa":
                 url = get_asf_result(product_id=product_id)
-                stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=provider)
+                zip_product = stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=provider)
             else:
-                stream_eodag_s3(s3, product, provider=provider, S3_BUCKET=s3_bucket)
+                zip_product = stream_eodag_s3(s3, product, provider=provider, S3_BUCKET=s3_bucket)
+            if zip_product.endswith(".zip"):
+                open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
             print("Uploaded product!")
             return
         raise Exception("S1_SAR_GRD: all providers failed")
@@ -270,8 +320,13 @@ def access(s3, provider=None, s3_bucket="eodag"):
                 open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
         else:
             # Converge on "cop_dataspace_s3" like every other fetch path here.
-            product, real_filename = get_cop_dataspace_s3_whole_product_result()
-            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename, provider="cop_dataspace_s3")
+            try:
+                product, real_filename = get_cop_dataspace_s3_whole_product_result()
+                stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename, provider="cop_dataspace_s3")
+            except ValueError:
+                # Folder-based (e.g. ETAD's .SAFE) -- mirror every real file instead.
+                if not _mirror_whole_folder(s3, s3_bucket, "cop_dataspace_s3", collection, os.environ["ITEM_ID"]):
+                    return
     elif provider in ["cop_dataspace_s3"]:
         # Always fetch+extract the whole product, not just the one asset requested.
         # (Thumbnail requests never reach this DAG at all -- HDA redirects
@@ -291,29 +346,21 @@ def access(s3, provider=None, s3_bucket="eodag"):
                 print(f"Copied to: {target_key}")
         # No eodag product-type registration for this id -- fall back to
         # the direct per-asset resolvers (pre-existing behavior).
-        elif collection in ["S2_MSI_L1C", "S2_MSI_L2A"]:
-            files = get_cop_dataspace_s3_result()
-            if not files:
-                print(f"Could not resolve product via eodag or direct S3 lookup for item {os.environ.get('ITEM_ID')}")
-                return
-            s3_cdse = aws()
-            item_id = os.environ["ITEM_ID"]
-            for real_key, relative_path in files:
-                stream = s3_cdse.get_object(Bucket="eodata", Key=real_key)["Body"]
-                stream_cop_dataspace_s3(s3, stream, S3_BUCKET=s3_bucket, real_key=relative_path)
-            marker_key = f"{provider}/{collection}/{item_id}/_asset_mirror_complete"
-            s3.upload_fileobj(io.BytesIO(b""), Bucket=s3_bucket, Key=marker_key)
-            print(f"Marked complete: {marker_key}")
         else:
-            result = get_cop_dataspace_s3_asset_result()
-            if result is None:
-                # Genuinely no such asset (e.g. a bogus/typo'd name) -- not an
-                # application error, so this DAG run completes cleanly instead
-                # of surfacing as a failed task.
-                print(f"Asset not found: collection={collection} item_id={os.environ.get('ITEM_ID')} product_id={os.environ.get('PRODUCT_ID')}")
-                return
-            fallback_product, real_relative_path = result
-            stream_cop_dataspace_s3(s3, fallback_product, S3_BUCKET=s3_bucket, real_key=real_relative_path)
+            try:
+                if not _mirror_whole_folder(s3, s3_bucket, provider, collection, os.environ["ITEM_ID"]):
+                    return
+            except ValueError:
+                # Single file (e.g. an AUX orbit file) -- not folder-based.
+                result = get_cop_dataspace_s3_asset_result()
+                if result is None:
+                    # Genuinely no such asset (e.g. a bogus/typo'd name) -- not an
+                    # application error, so this DAG run completes cleanly instead
+                    # of surfacing as a failed task.
+                    print(f"Asset not found: collection={collection} item_id={os.environ.get('ITEM_ID')} product_id={os.environ.get('PRODUCT_ID')}")
+                    return
+                fallback_product, real_relative_path = result
+                stream_cop_dataspace_s3(s3, fallback_product, S3_BUCKET=s3_bucket, real_key=real_relative_path)
     elif provider in ["cop_ads", "cop_cds", "cop_ewds"]:
         product = get_cds_result()
         if not product:
