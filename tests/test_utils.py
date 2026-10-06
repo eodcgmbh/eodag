@@ -101,6 +101,66 @@ def test_open_zip_keeps_s2_un_stripped_key_shape(mock_s3):
 
 
 # ---------------------------------------------------------------------------
+# access() -- S1_SAR_GRD multi-provider downloadLink fallback
+# ---------------------------------------------------------------------------
+
+def test_access_s1_sar_grd_downloadlink_unzips_eodag_result(monkeypatch):
+    # This branch shares its Airflow run with per-asset ("cop_dataspace_s3")
+    # requests for the same item -- if it doesn't unzip here too, those
+    # requests permanently 404 once this run is marked "success".
+    monkeypatch.setenv("PROVIDER", "cop_dataspace")
+    monkeypatch.setenv("COLLECTION", "S1_SAR_GRD")
+    monkeypatch.setenv("ITEM_ID", "S1A_IW_GRDH_1SDV_X")
+    monkeypatch.setenv("PRODUCT_ID", "S1A_IW_GRDH_1SDV_X.zip")
+
+    fake_product = MagicMock(provider="cop_dataspace")
+    dag = MagicMock()
+    dag.search.return_value = [fake_product]
+    open_zip = MagicMock()
+
+    monkeypatch.setattr(utils, "EODataAccessGateway", MagicMock(return_value=dag))
+    monkeypatch.setattr(utils, "stream_eodag_s3", MagicMock(return_value="cop_dataspace/S1_SAR_GRD/S1A_IW_GRDH_1SDV_X/S1A_IW_GRDH_1SDV_X.zip"))
+    monkeypatch.setattr(utils, "open_zip", open_zip)
+
+    mock_s3 = MagicMock()
+    utils.access(mock_s3, s3_bucket="mybucket")
+
+    open_zip.assert_called_once_with(
+        s3=mock_s3,
+        zip_product="cop_dataspace/S1_SAR_GRD/S1A_IW_GRDH_1SDV_X/S1A_IW_GRDH_1SDV_X.zip",
+        s3_bucket="mybucket",
+        target_provider="cop_dataspace_s3",
+    )
+
+
+def test_access_s1_sar_grd_downloadlink_unzips_asf_fallback(monkeypatch):
+    monkeypatch.setenv("PROVIDER", "cop_dataspace")
+    monkeypatch.setenv("COLLECTION", "S1_SAR_GRD")
+    monkeypatch.setenv("ITEM_ID", "S1A_IW_GRDH_1SDV_X")
+    monkeypatch.setenv("PRODUCT_ID", "S1A_IW_GRDH_1SDV_X.zip")
+
+    fake_product = MagicMock(provider="nasa")
+    dag = MagicMock()
+    dag.search.return_value = [fake_product]
+    open_zip = MagicMock()
+
+    monkeypatch.setattr(utils, "EODataAccessGateway", MagicMock(return_value=dag))
+    monkeypatch.setattr(utils, "get_asf_result", MagicMock(return_value="https://asf.example/S1A_IW_GRDH_1SDV_X.zip"))
+    monkeypatch.setattr(utils, "stream_asf_s3", MagicMock(return_value="cop_dataspace/S1_SAR_GRD/S1A_IW_GRDH_1SDV_X/S1A_IW_GRDH_1SDV_X.zip"))
+    monkeypatch.setattr(utils, "open_zip", open_zip)
+
+    mock_s3 = MagicMock()
+    utils.access(mock_s3, s3_bucket="mybucket")
+
+    open_zip.assert_called_once_with(
+        s3=mock_s3,
+        zip_product="cop_dataspace/S1_SAR_GRD/S1A_IW_GRDH_1SDV_X/S1A_IW_GRDH_1SDV_X.zip",
+        s3_bucket="mybucket",
+        target_provider="cop_dataspace_s3",
+    )
+
+
+# ---------------------------------------------------------------------------
 # access() -- cop_dataspace_s3 routing
 # ---------------------------------------------------------------------------
 

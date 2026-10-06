@@ -292,6 +292,9 @@ def access(s3, provider=None, s3_bucket="eodag"):
 
     # Multi-provider fallback, downloadLink only -- per-asset requests use
     # "cop_dataspace_s3" and fall through to the standard dispatch below.
+    # Shares its Airflow run with those per-asset requests (same item_id,
+    # same dag_run_id), so it must also unzip here -- there's no second run
+    # coming to do it once this one is marked "success".
     if collection == "S1_SAR_GRD" and provider == "cop_dataspace":
         product_id = _normalize_product_id(os.environ["PRODUCT_ID"])
         dag = EODataAccessGateway()
@@ -300,9 +303,11 @@ def access(s3, provider=None, s3_bucket="eodag"):
             product = results[0]
             if product.provider == "nasa":
                 url = get_asf_result(product_id=product_id)
-                stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=provider)
+                zip_product = stream_asf_s3(s3, url, S3_BUCKET=s3_bucket, provider=provider)
             else:
-                stream_eodag_s3(s3, product, provider=provider, S3_BUCKET=s3_bucket)
+                zip_product = stream_eodag_s3(s3, product, provider=provider, S3_BUCKET=s3_bucket)
+            if zip_product.endswith(".zip"):
+                open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
             print("Uploaded product!")
             return
         raise Exception("S1_SAR_GRD: all providers failed")
