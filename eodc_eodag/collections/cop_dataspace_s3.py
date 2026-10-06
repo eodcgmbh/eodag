@@ -109,10 +109,14 @@ def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
 
     s3_aws = aws()
     basename = key_or_prefix.split("/")[-1]
-    # CDSE_FIXED_ASSETS' single-file collections request a generic
-    # extension-only label (e.g. "TGZ", "EOF", "nc") rather than the real
-    # filename -- accept either form.
-    if basename == asset_name or basename.rsplit(".", 1)[-1] == asset_name:
+    # A non-SAFE/SEN3 flat file IS the whole product when product_id == item_id.
+    is_whole_product_request = product_id == item_id
+    is_flat_file = "." in basename and not basename.lower().endswith((".safe", ".sen3"))
+    if (
+        (is_whole_product_request and is_flat_file)
+        or basename == asset_name
+        or basename.rsplit(".", 1)[-1] == asset_name
+    ):
         key = key_or_prefix  # single-file product: S3Path already is the key
         relative_path = basename
     else:
