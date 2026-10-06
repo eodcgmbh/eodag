@@ -1,5 +1,4 @@
 import os
-import re
 import requests
 import boto3
 
@@ -95,41 +94,33 @@ def get_cop_dataspace_s3_asset_result(product_id=None, item_id=None):
     return stream, relative_path
 
 
-def get_cop_dataspace_s3_result(item_id=None):
-    # Whole-product fetch: lists every real file under the matched SAFE path.
+def get_cop_dataspace_s3_folder_result(item_id=None):
+    # Whole-product fetch for collections eodag has no product-type
+    # registration for, when the real CDSE object is folder-based (.SAFE/
+    # .SEN3) rather than a single file -- lists every real file under the
+    # matched path. Mission-agnostic: the OData lookup needs no per-mission
+    # path reconstruction (unlike the old S2-only regex this replaced).
     if not item_id:
         item_id = os.environ["ITEM_ID"]
 
-    re_str = re.search(
-        r"^(S2A|S2B|S2C|S2D)_(MSIL1C|MSIL2A)_(\d{8}T\d{6})_(N\d{4})_(R\d{3})_(.{6})_(\d{8}T\d{6})",
-        item_id
-    )
-    if not re_str:
-        print(f"Could not resolve string for item: {item_id}.")
-        return None
+    key_or_prefix = _lookup_s3path(item_id)
+    basename = key_or_prefix.rsplit("/", 1)[-1]
+    if "." in basename and not basename.lower().endswith((".safe", ".sen3")):
+        raise ValueError(f"{item_id!r} is a single file, not folder-based")
 
-    dataset = re_str.group(1)
-    path = "Sentinel-2/" if dataset.startswith("S2") else ""
-    sub_path = re_str.group(2)
-    path = path + sub_path[:3] + "/" + sub_path[3:] + "/"
-    datetime_ = re_str.group(3)
-    mission_root = path + datetime_[:4] + "/" + datetime_[4:6] + "/" + datetime_[6:8] + "/"
-    path = mission_root + re_str.group() + ".SAFE" + "/"
+    mission_root = key_or_prefix[: -len(basename)]
+    prefix = key_or_prefix + "/"
 
     s3_aws = aws()
-    try:
-        paginator = s3_aws.get_paginator("list_objects_v2")
-        keys = [
-            content["Key"]
-            for page in paginator.paginate(Bucket="eodata", Prefix=path)
-            for content in page.get("Contents", [])
-        ]
-    except Exception as e:
-        print(f"Could not list objects for {e}")
-        return None
+    paginator = s3_aws.get_paginator("list_objects_v2")
+    keys = [
+        content["Key"]
+        for page in paginator.paginate(Bucket="eodata", Prefix=prefix)
+        for content in page.get("Contents", [])
+    ]
 
     if not keys:
-        print(f"Could not find any files for item: {item_id} under {path}")
+        print(f"Could not find any files for item: {item_id} under {prefix}")
         return None
 
     return [(key, key[len(mission_root):]) for key in keys]
