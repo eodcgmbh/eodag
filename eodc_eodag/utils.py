@@ -240,19 +240,45 @@ def open_zip(s3, zip_product, provider=None, collection=None, item_id=None,
         print(f"Marked complete: {marker_key}")
 
 
-def _mirror_whole_folder(s3, s3_bucket, provider, collection, item_id):
+def _mirror_whole_folder(s3, s3_bucket, provider, collection, item_id, CHUNK_SIZE=8388608):
     # Mirrors every real file under a folder-based (.SAFE/.SEN3) product that
     # eodag has no product-type registration for (e.g. ETAD's measurement/
     # annotation/preview/support layout) -- same approach as open_zip(), just
     # reading the real files directly from CDSE instead of from a local zip.
+    # Also builds the zip itself for downloadLink, under "cop_dataspace" --
+    # mirrors the registered-product flow, which always produces both a zip
+    # (open_zip()'s input) and per-asset files (its output) in one run,
+    # regardless of which request actually triggered the DAG.
+    import tempfile
+    import zipfile
+
     files = get_cop_dataspace_s3_folder_result(item_id)
     if not files:
         print(f"Could not resolve product via direct S3 lookup for item {item_id}")
         return False
     s3_cdse = aws()
-    for real_key, relative_path in files:
-        stream = s3_cdse.get_object(Bucket="eodata", Key=real_key)["Body"]
-        stream_cop_dataspace_s3(s3, stream, S3_BUCKET=s3_bucket, provider=provider, collection=collection, item_id=item_id, real_key=relative_path)
+    identifier = item_id.replace(".SAFE", "")
+    transfer_config = boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, f"{identifier}.zip")
+        member_path = os.path.join(tmpdir, "_member")
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for real_key, relative_path in files:
+                s3_cdse.download_file("eodata", real_key, member_path)
+                with open(member_path, "rb") as f:
+                    stream_cop_dataspace_s3(
+                        s3, f, S3_BUCKET=s3_bucket, provider=provider, collection=collection,
+                        item_id=item_id, real_key=relative_path,
+                    )
+                zf.write(member_path, arcname=relative_path)
+                os.remove(member_path)
+
+        zip_target = f"cop_dataspace/{collection}/{identifier}/{identifier}.zip"
+        with open(zip_path, "rb") as zf_stream:
+            s3.upload_fileobj(zf_stream, Bucket=s3_bucket, Key=zip_target, Config=transfer_config)
+        print(f"Uploaded zip: {zip_target}")
+
     marker_key = f"{provider}/{collection}/{item_id}/_asset_mirror_complete"
     s3.upload_fileobj(io.BytesIO(b""), Bucket=s3_bucket, Key=marker_key)
     print(f"Marked complete: {marker_key}")

@@ -223,23 +223,25 @@ def test_access_cop_dataspace_s3_folder_fallback_uploads_every_file(base_env, mo
     monkeypatch.setenv("PRODUCT_ID", item_id)
 
     files = [("eodata/key1", f"{item_id}.SAFE/manifest.safe"), ("eodata/key2", f"{item_id}.SAFE/measurement/{item_id}.nc")]
-    fake_streams = [object(), object()]
+    contents = {real_key: f"content-{real_key}".encode() for real_key, _ in files}
     mock_s3_cdse = MagicMock()
-    mock_s3_cdse.get_object.side_effect = [{"Body": s} for s in fake_streams]
-    stream_cop_dataspace_s3 = MagicMock()
+    mock_s3_cdse.download_file.side_effect = lambda Bucket, Key, Filename: open(Filename, "wb").write(contents[Key])
+    captured_streams = []
+    stream_cop_dataspace_s3 = MagicMock(side_effect=lambda s3_arg, f, **kwargs: captured_streams.append((f.read(), kwargs)))
+    uploaded = {}
+    s3_eodc = MagicMock()
+    s3_eodc.upload_fileobj.side_effect = lambda fileobj, Bucket, Key, **kwargs: uploaded.__setitem__(Key, fileobj.read())
 
     monkeypatch.setattr(utils, "get_eodag_result", MagicMock(return_value=None))
     monkeypatch.setattr(utils, "get_cop_dataspace_s3_folder_result", MagicMock(return_value=files))
     monkeypatch.setattr(utils, "aws", MagicMock(return_value=mock_s3_cdse))
     monkeypatch.setattr(utils, "stream_cop_dataspace_s3", stream_cop_dataspace_s3)
 
-    s3_eodc = MagicMock()
     utils.access(s3_eodc, s3_bucket="mybucket")
 
-    assert stream_cop_dataspace_s3.call_count == 2
-    for call, (real_key, relative_path), stream in zip(stream_cop_dataspace_s3.mock_calls, files, fake_streams):
-        _, args, kwargs = call
-        assert args[1] is stream
+    assert len(captured_streams) == 2
+    for (content, kwargs), (real_key, relative_path) in zip(captured_streams, files):
+        assert content == contents[real_key]
         assert kwargs == {
             "S3_BUCKET": "mybucket",
             "provider": "cop_dataspace_s3",
@@ -247,9 +249,17 @@ def test_access_cop_dataspace_s3_folder_fallback_uploads_every_file(base_env, mo
             "item_id": item_id,
             "real_key": relative_path,
         }
-    s3_eodc.upload_fileobj.assert_called_once()
-    _, _, kwargs = s3_eodc.upload_fileobj.mock_calls[0]
-    assert kwargs["Key"] == f"cop_dataspace_s3/S1_AUX/{item_id}/_asset_mirror_complete"
+
+    assert f"cop_dataspace_s3/S1_AUX/{item_id}/_asset_mirror_complete" in uploaded
+
+    import io
+    import zipfile
+    zip_key = f"cop_dataspace/S1_AUX/{item_id}/{item_id}.zip"
+    assert zip_key in uploaded
+    with zipfile.ZipFile(io.BytesIO(uploaded[zip_key])) as zf:
+        assert sorted(zf.namelist()) == sorted(relative_path for _, relative_path in files)
+        for real_key, relative_path in files:
+            assert zf.read(relative_path) == contents[real_key]
 
 
 def test_access_cop_dataspace_s3_folder_fallback_returns_cleanly_when_unresolvable(base_env, monkeypatch, capsys):
@@ -279,10 +289,14 @@ def test_access_cop_dataspace_whole_product_fallback_mirrors_folder_for_safe_ite
     monkeypatch.setenv("PRODUCT_ID", f"{item_id}.zip")
 
     files = [("eodata/key1", f"{item_id}.SAFE/manifest.safe")]
-    fake_stream = object()
+    content = b"fake-manifest-bytes"
     mock_s3_cdse = MagicMock()
-    mock_s3_cdse.get_object.return_value = {"Body": fake_stream}
-    stream_cop_dataspace_s3 = MagicMock()
+    mock_s3_cdse.download_file.side_effect = lambda Bucket, Key, Filename: open(Filename, "wb").write(content)
+    captured_streams = []
+    stream_cop_dataspace_s3 = MagicMock(side_effect=lambda s3_arg, f, **kwargs: captured_streams.append((f.read(), kwargs)))
+    uploaded = {}
+    s3_eodc = MagicMock()
+    s3_eodc.upload_fileobj.side_effect = lambda fileobj, Bucket, Key, **kwargs: uploaded.__setitem__(Key, fileobj.read())
 
     monkeypatch.setattr(utils, "get_eodag_result", MagicMock(return_value=None))
     monkeypatch.setattr(utils, "get_cop_dataspace_s3_whole_product_result", MagicMock(side_effect=ValueError))
@@ -290,12 +304,11 @@ def test_access_cop_dataspace_whole_product_fallback_mirrors_folder_for_safe_ite
     monkeypatch.setattr(utils, "aws", MagicMock(return_value=mock_s3_cdse))
     monkeypatch.setattr(utils, "stream_cop_dataspace_s3", stream_cop_dataspace_s3)
 
-    s3_eodc = MagicMock()
     utils.access(s3_eodc, s3_bucket="mybucket")
 
-    stream_cop_dataspace_s3.assert_called_once()
-    _, args, kwargs = stream_cop_dataspace_s3.mock_calls[0]
-    assert args[1] is fake_stream
+    assert len(captured_streams) == 1
+    content_read, kwargs = captured_streams[0]
+    assert content_read == content
     assert kwargs == {
         "S3_BUCKET": "mybucket",
         "provider": "cop_dataspace_s3",
@@ -303,3 +316,8 @@ def test_access_cop_dataspace_whole_product_fallback_mirrors_folder_for_safe_ite
         "item_id": item_id,
         "real_key": f"{item_id}.SAFE/manifest.safe",
     }
+
+    # downloadLink (provider="cop_dataspace") resolves this item's zip via a
+    # plain head_object on this exact key -- must land here, not elsewhere.
+    zip_key = f"cop_dataspace/S1_AUX/{item_id}/{item_id}.zip"
+    assert zip_key in uploaded
