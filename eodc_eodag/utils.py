@@ -269,8 +269,9 @@ def access(s3, provider=None, s3_bucket="eodag"):
             if zip_product.endswith(".zip"):
                 open_zip(s3=s3, zip_product=zip_product, s3_bucket=s3_bucket, target_provider="cop_dataspace_s3")
         else:
+            # Converge on "cop_dataspace_s3" like every other fetch path here.
             product, real_filename = get_cop_dataspace_s3_whole_product_result()
-            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename)
+            stream_cop_dataspace_s3(s3, product, S3_BUCKET=s3_bucket, real_key=real_filename, provider="cop_dataspace_s3")
     elif provider in ["cop_dataspace_s3"]:
         # Always fetch+extract the whole product, not just the one asset requested.
         # (Thumbnail requests never reach this DAG at all -- HDA redirects
