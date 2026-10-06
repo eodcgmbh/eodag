@@ -133,6 +133,29 @@ def test_access_cop_dataspace_s3_copies_non_zip_result_to_the_right_prefix(base_
     )
 
 
+def test_access_cop_dataspace_whole_product_fallback_converges_on_cop_dataspace_s3(base_env, monkeypatch):
+    """downloadLink's OData-direct fallback (no eodag registration, e.g. AUX)
+    must write to the same prefix the named-asset path uses, or the two
+    requests permanently diverge into two different copies of the file."""
+    monkeypatch.setenv("PROVIDER", "cop_dataspace")
+    fake_stream = object()
+    stream_cop_dataspace_s3 = MagicMock()
+
+    monkeypatch.setattr(utils, "get_eodag_result", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        utils, "get_cop_dataspace_s3_whole_product_result",
+        MagicMock(return_value=(fake_stream, "orbitfile.EOF")),
+    )
+    monkeypatch.setattr(utils, "stream_cop_dataspace_s3", stream_cop_dataspace_s3)
+
+    utils.access(MagicMock(), s3_bucket="mybucket")
+
+    stream_cop_dataspace_s3.assert_called_once()
+    _, args, kwargs = stream_cop_dataspace_s3.mock_calls[0]
+    assert args[1] is fake_stream
+    assert kwargs == {"S3_BUCKET": "mybucket", "real_key": "orbitfile.EOF", "provider": "cop_dataspace_s3"}
+
+
 def test_access_cop_dataspace_s3_prefers_whole_product_fetch(base_env, monkeypatch):
     fake_product = object()
     get_eodag_result = MagicMock(return_value=fake_product)
