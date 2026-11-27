@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 
 class EarthdataSession(requests.Session):
     AUTH_HOST = "urs.earthdata.nasa.gov"
@@ -88,7 +89,7 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
                                 Body=buffer,
                             )
                             parts.append({"PartNumber": part_number, "ETag": part["ETag"]})
-                            print(f"Uploaded part {part_number} ({len(buffer) / 1024 / 1024:.1f} MB)", flush=True)
+                            print(f"{time.monotonic()} - Uploaded part {part_number} ({len(buffer) / 1024 / 1024:.1f} MB)", flush=True)
                             part_number += 1
                             buffer = b""
                     if buffer:
