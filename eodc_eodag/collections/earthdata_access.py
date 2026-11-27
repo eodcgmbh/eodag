@@ -78,20 +78,21 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
                 buffer = b""
                 MIN_PART_SIZE = 50 * 1024 * 1024
                 try:
+                    t_dl = t_up = 0.0
+                    mark = time.monotonic()
                     for chunk in r.iter_content(chunk_size=10 * 1024 * 1024):
+                        t_dl += time.monotonic() - mark
                         buffer += chunk
                         if len(buffer) >= MIN_PART_SIZE:
-                            part = s3.upload_part(
-                                Bucket=S3_BUCKET,
-                                Key=s3_target,
-                                PartNumber=part_number,
-                                UploadId=upload_id,
-                                Body=buffer,
-                            )
+                            t0 = time.monotonic()
+                            part = s3.upload_part(Bucket=S3_BUCKET, Key=s3_target, PartNumber=part_number,
+                                                UploadId=upload_id, Body=buffer)
+                            t_up += time.monotonic() - t0
                             parts.append({"PartNumber": part_number, "ETag": part["ETag"]})
-                            print(f"{time.monotonic()} - Uploaded part {part_number} ({len(buffer) / 1024 / 1024:.1f} MB)", flush=True)
+                            print(f"part {part_number}: download {t_dl:.0f}s, upload {t_up:.0f}s (cumulative)", flush=True)
                             part_number += 1
                             buffer = b""
+                        mark = time.monotonic()
                     if buffer:
                         part = s3.upload_part(
                             Bucket=S3_BUCKET,
