@@ -72,3 +72,4 @@ def stream_asf_s3(s3, url, S3_BUCKET="eodag", CHUNK_SIZE=8388608, provider=None)
                 Config=boto3.s3.transfer.TransferConfig(multipart_threshold=CHUNK_SIZE),
             )
     print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
+    return s3_target
