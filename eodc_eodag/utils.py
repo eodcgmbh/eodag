@@ -370,7 +370,7 @@ def access(s3, provider=None, s3_bucket="eodag"):
     elif provider in ["nasa"]:
         url = get_earthdata_result()
         try:
-            stream_earthdata_s3_parallel(s3, url, S3_BUCKET="eodag", workers=8)
+            stream_earthdata_s3_parallel(s3, url, S3_BUCKET="eodag", workers=4, part_size=16 * 1024 * 1024)
         except RangesNotSupported:
             stream_earthdata_s3(s3, url, S3_BUCKET="eodag")
     elif provider in ["asf"]:
