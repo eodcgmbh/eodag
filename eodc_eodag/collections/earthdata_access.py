@@ -1,26 +1,7 @@
 import os
 import requests
-import threading
 import time
 
-from boto3.s3.transfer import TransferConfig
-
-MB = 1024 * 1024
-
-TRANSFER_CONFIG = TransferConfig(
-    multipart_threshold=50 * MB,
-    multipart_chunksize=50 * MB,
-    max_concurrency=4,
-    use_threads=True,
-)
-
-CONTENT_TYPES = {
-    ".h5": "application/x-hdf5",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-}
- 
- 
 class EarthdataSession(requests.Session):
     AUTH_HOST = "urs.earthdata.nasa.gov"
 
@@ -75,31 +56,7 @@ def get_earthdata_result(product_id=None, provider=None, collection=None, filety
         raise Exception(f"Product not found: {product_id}")
     return url
 
-class ProgressLogger:
-
-    def __init__(self, label, every=250 * MB):
-        self.label = label
-        self.every = every
-        self.seen = 0
-        self.next_log = every
-        self.start = time.monotonic()
-        self.lock = threading.Lock()
-
-    def __call__(self, bytes_amount):
-        with self.lock:
-            self.seen += bytes_amount
-            if self.seen >= self.next_log:
-                elapsed = time.monotonic() - self.start
-                rate = self.seen / MB / elapsed if elapsed else 0.0
-                print(f"{self.label}: {self.seen / MB:,.0f} MB uploaded ({rate:.1f} MB/s)", flush=True)
-                self.next_log += self.every
-
-    def done(self):
-        elapsed = time.monotonic() - self.start
-        print(f"{self.label}: finished, {self.seen / MB:,.1f} MB in {elapsed:.1f}s", flush=True)
-
-
-def stream_earthdata_s3(s3, url, S3_BUCKET="eodag", config=TRANSFER_CONFIG):
+def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
     earthdata_username = os.environ["EARTHDATA_USERNAME"]
     earthdata_password = os.environ["EARTHDATA_PASSWORD"]
     provider = os.environ["PROVIDER"]
@@ -108,30 +65,65 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag", config=TRANSFER_CONFIG):
     filename = url.split("/")[-1]
     if " " in collection or "/" in collection:
         collection = collection.replace(" ", "_").replace("/", "_")
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in CONTENT_TYPES:
-        raise ValueError(f"Unsupported file type: {filename}")
     s3_target = f"{provider}/{collection}/{item_id}/{filename}"
-
-    with EarthdataSession(earthdata_username, earthdata_password) as session:
-        with session.get(url, stream=True, timeout=(10, 60)) as r:
-            r.raise_for_status()
-            r.raw.decode_content = True
-
-            size = r.headers.get("Content-Length")
-            size_txt = f"{int(size) / MB:,.1f} MB" if size else "unknown size"
-            print(f"Status: {r.status_code}, {size_txt}", flush=True)
-
-            progress = ProgressLogger(filename)
-            s3.upload_fileobj(
-                Fileobj=r.raw,
-                Bucket=S3_BUCKET,
-                Key=s3_target,
-                ExtraArgs={"ContentType": CONTENT_TYPES[ext]},
-                Config=config,
-                Callback=progress,
-            )
-            progress.done()
-
-    print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}", flush=True)
- 
+    if url.endswith(".h5"):
+        with EarthdataSession(earthdata_username, earthdata_password) as session:
+            with session.get(url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                print(f"Status: {r.status_code}")
+                mpu = s3.create_multipart_upload(Bucket=S3_BUCKET, Key=s3_target)
+                upload_id = mpu["UploadId"]
+                parts = []
+                part_number = 1
+                buffer = b""
+                MIN_PART_SIZE = 50 * 1024 * 1024
+                try:
+                    for chunk in r.iter_content(chunk_size=10 * 1024 * 1024):
+                        buffer += chunk
+                        if len(buffer) >= MIN_PART_SIZE:
+                            part = s3.upload_part(
+                                Bucket=S3_BUCKET,
+                                Key=s3_target,
+                                PartNumber=part_number,
+                                UploadId=upload_id,
+                                Body=buffer,
+                            )
+                            parts.append({"PartNumber": part_number, "ETag": part["ETag"]})
+                            print(f"{time.monotonic()} - Uploaded part {part_number} ({len(buffer) / 1024 / 1024:.1f} MB)", flush=True)
+                            part_number += 1
+                            buffer = b""
+                    if buffer:
+                        part = s3.upload_part(
+                            Bucket=S3_BUCKET,
+                            Key=s3_target,
+                            PartNumber=part_number,
+                            UploadId=upload_id,
+                            Body=buffer,
+                        )
+                        parts.append({"PartNumber": part_number, "ETag": part["ETag"]})
+                    s3.complete_multipart_upload(
+                        Bucket=S3_BUCKET,
+                        Key=s3_target,
+                        UploadId=upload_id,
+                        MultipartUpload={"Parts": parts},
+                    )
+                    print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
+                except Exception as e:
+                    s3.abort_multipart_upload(Bucket=S3_BUCKET, Key=s3_target, UploadId=upload_id)
+                    raise e
+    elif url.endswith(".png"):
+        r = requests.get(url, auth=(earthdata_username, earthdata_password), stream=True)
+        s3.upload_fileobj(
+            Fileobj=r.raw,
+            Bucket=S3_BUCKET,
+            Key=s3_target
+        )
+        print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
+    elif url.endswith(".jpg"):
+        r = requests.get(url, auth=(earthdata_username, earthdata_password), stream=True)
+        s3.upload_fileobj(
+            Fileobj=r.raw,
+            Bucket=S3_BUCKET,
+            Key=s3_target
+        )
+        print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
