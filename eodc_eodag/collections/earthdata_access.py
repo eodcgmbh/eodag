@@ -1,6 +1,16 @@
 import os
-import requests
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlparse
+
+import requests
+
+MB = 1024 * 1024
+MAX_RETRIES = 5
+TIMEOUT = (10, 60)  # connect, read
+CONTENT_TYPES = {".h5": "application/x-hdf5", ".png": "image/png", ".jpg": "image/jpeg"}
+
 
 class EarthdataSession(requests.Session):
     AUTH_HOST = "urs.earthdata.nasa.gov"
@@ -11,8 +21,8 @@ class EarthdataSession(requests.Session):
 
     def rebuild_auth(self, prepared_request, response):
         if "Authorization" in prepared_request.headers:
-            original = requests.utils.urlparse(response.request.url).hostname
-            redirect = requests.utils.urlparse(prepared_request.url).hostname
+            original = urlparse(response.request.url).hostname
+            redirect = urlparse(prepared_request.url).hostname
             if original != redirect and redirect != self.AUTH_HOST:
                 del prepared_request.headers["Authorization"]
 
@@ -128,3 +138,154 @@ def stream_earthdata_s3(s3, url, S3_BUCKET="eodag"):
             Key=s3_target
         )
         print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}")
+
+class RangesNotSupported(Exception):
+    """The server does not answer byte-range requests; fall back to the sequential upload."""
+
+
+class RangeSource:
+    """
+    Fetches byte ranges of one Earthdata file from several threads.
+
+    The Earthdata login and redirects are done once; afterwards the threads request the final
+    (usually pre-signed) download URL directly. If that URL expires (401/403), the request goes
+    through the login again and the new final URL is shared with all threads.
+    """
+
+    def __init__(self, url, username, password):
+        self.original = url
+        self.username = username
+        self.password = password
+        self.lock = threading.Lock()
+        self.local = threading.local()
+
+        r = self._via_login(0, 0)
+        try:
+            r.raise_for_status()
+            content_range = r.headers.get("Content-Range", "")
+            total = content_range.rsplit("/", 1)[-1]
+            if r.status_code != 206 or not total.isdigit():
+                raise RangesNotSupported(f"No byte-range support for {url} (status {r.status_code})")
+            self.size = int(total)
+        finally:
+            r.close()
+
+    def _session(self, kind):
+        session = getattr(self.local, kind, None)
+        if session is None:
+            if kind == "login":
+                session = EarthdataSession(self.username, self.password)
+            else:
+                session = requests.Session()
+            setattr(self.local, kind, session)
+        return session
+
+    def _via_login(self, start, end):
+        r = self._session("login").get(
+            self.original, headers={"Range": f"bytes={start}-{end}"}, timeout=TIMEOUT
+        )
+        if r.ok:
+            with self.lock:
+                self.final = r.url
+                # No redirect away from the original host: every request has to carry the login.
+                self.use_login = urlparse(r.url).hostname == urlparse(self.original).hostname
+        return r
+
+    def get_range(self, start, end):
+        if not self.use_login:
+            r = self._session("plain").get(
+                self.final, headers={"Range": f"bytes={start}-{end}"}, timeout=TIMEOUT
+            )
+            if r.status_code not in (401, 403):
+                return r
+            r.close()
+        return self._via_login(start, end)
+
+
+def _transfer_part(src, s3, bucket, key, upload_id, number, start, end):
+    expected = end - start + 1
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            r = src.get_range(start, end)
+            r.raise_for_status()
+            body = r.content
+            if r.status_code != 206 or len(body) != expected:
+                raise IOError(f"got {len(body)} of {expected} bytes (status {r.status_code})")
+            break
+        except (requests.RequestException, IOError) as e:
+            last_error = e
+            print(f"part {number}: attempt {attempt} failed: {e}", flush=True)
+            time.sleep(min(2 ** attempt, 30))
+    else:
+        raise last_error
+
+    part = s3.upload_part(Bucket=bucket, Key=key, PartNumber=number, UploadId=upload_id, Body=body)
+    return {"PartNumber": number, "ETag": part["ETag"]}, expected
+
+
+def stream_earthdata_s3_parallel(s3, url, S3_BUCKET="eodag", part_size=50 * MB, workers=8):
+    username = os.environ["EARTHDATA_USERNAME"]
+    password = os.environ["EARTHDATA_PASSWORD"]
+    provider = os.environ["PROVIDER"]
+    collection = os.environ["COLLECTION"].replace(" ", "_").replace("/", "_")
+    item_id = os.environ["ITEM_ID"]
+
+    filename = url.split("/")[-1]
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in CONTENT_TYPES:
+        raise ValueError(f"Unsupported file type: {filename}")
+    s3_target = f"{provider}/{collection}/{item_id}/{filename}"
+
+    src = RangeSource(url, username, password)
+    size = src.size
+
+    # Small files (browse images): one request, one put.
+    if size <= part_size:
+        r = src.get_range(0, size - 1)
+        r.raise_for_status()
+        s3.put_object(Bucket=S3_BUCKET, Key=s3_target, Body=r.content, ContentType=CONTENT_TYPES[ext])
+        print(f"Uploaded to s3://{S3_BUCKET}/{s3_target}", flush=True)
+        return
+
+    ranges = [
+        (number, start, min(start + part_size, size) - 1)
+        for number, start in enumerate(range(0, size, part_size), start=1)
+    ]
+    if len(ranges) > 10_000:
+        raise ValueError(f"{len(ranges)} parts exceed the S3 limit of 10,000; increase part_size")
+    print(f"{filename}: {size / MB:,.1f} MB in {len(ranges)} parts, {workers} workers", flush=True)
+
+    mpu = s3.create_multipart_upload(Bucket=S3_BUCKET, Key=s3_target, ContentType=CONTENT_TYPES[ext])
+    upload_id = mpu["UploadId"]
+    parts, done, t0 = [], 0, time.monotonic()
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
+        futures = [
+            pool.submit(_transfer_part, src, s3, S3_BUCKET, s3_target, upload_id, n, start, end)
+            for n, start, end in ranges
+        ]
+        for future in as_completed(futures):
+            part, nbytes = future.result()
+            parts.append(part)
+            done += nbytes
+            if len(parts) % 10 == 0 or len(parts) == len(ranges):
+                elapsed = time.monotonic() - t0
+                print(
+                    f"{len(parts)}/{len(ranges)} parts, {done / MB:,.0f} MB, "
+                    f"{done / MB / elapsed:.1f} MB/s",
+                    flush=True,
+                )
+        parts.sort(key=lambda p: p["PartNumber"])
+        s3.complete_multipart_upload(
+            Bucket=S3_BUCKET, Key=s3_target, UploadId=upload_id, MultipartUpload={"Parts": parts}
+        )
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        s3.abort_multipart_upload(Bucket=S3_BUCKET, Key=s3_target, UploadId=upload_id)
+        raise
+    finally:
+        pool.shutdown(wait=True)
+
+    elapsed = time.monotonic() - t0
+    print(f"Uploaded to s3://{S3_BUCKET}/{s3_target} in {elapsed:.0f}s", flush=True)

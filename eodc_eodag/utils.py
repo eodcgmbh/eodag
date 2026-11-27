@@ -17,7 +17,7 @@ from .collections.cop_dataspace_s3 import (
     get_cop_dataspace_s3_whole_product_result,
     stream_cop_dataspace_s3,
 )
-from .collections.earthdata_access import get_earthdata_result, stream_earthdata_s3
+from .collections.earthdata_access import get_earthdata_result, RangesNotSupported, stream_earthdata_s3, stream_earthdata_s3_parallel
 from .collections.maap_access import get_maap_result, stream_maap_s3
 from .collections.asf_access import get_asf_result, stream_asf_s3
 
@@ -369,7 +369,10 @@ def access(s3, provider=None, s3_bucket="eodag"):
         stream_cds_s3(s3, product, S3_BUCKET="eodag")
     elif provider in ["nasa"]:
         url = get_earthdata_result()
-        stream_earthdata_s3(s3, url, S3_BUCKET="eodag")
+        try:
+            stream_earthdata_s3_parallel(s3, url, S3_BUCKET="eodag", workers=8)
+        except RangesNotSupported:
+            stream_earthdata_s3(s3, url, S3_BUCKET="eodag")
     elif provider in ["asf"]:
         url = get_asf_result()
         stream_asf_s3(s3, url, S3_BUCKET=s3_bucket)
